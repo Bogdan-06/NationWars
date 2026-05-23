@@ -1,0 +1,33 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="All Rights Reserved"
+
+[[mods]]
+modId="nationwars"
+version="0.1.0"
+displayName="Nation Wars"
+authors="Moth"
+description='''
+Server-side nations, chunk claims, economy, paid raiding access, and war capture.
+'''
+
+[[dependencies.nationwars]]
+modId="neoforge"
+type="required"
+versionRange="[21.1.227,)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.nationwars]]
+modId="minecraft"
+type="required"
+versionRange="[1.21.1,1.22)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.nationwars]]
+modId="openpartiesandclaims"
+type="required"
+versionRange="[0.26.1,)"
+ordering="AFTER"
+side="BOTH"
