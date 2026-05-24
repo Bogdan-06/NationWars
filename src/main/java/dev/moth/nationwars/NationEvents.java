@@ -7,9 +7,11 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.UUID;
 import java.util.Map.Entry;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.BlockPos.MutableBlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -17,6 +19,9 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
+import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.BarrelBlock;
 import net.minecraft.world.level.block.Block;
@@ -31,6 +36,7 @@ import net.minecraft.world.level.levelgen.Heightmap.Types;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedInEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent.TabListNameFormat;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.RightClickBlock;
 import net.neoforged.neoforge.event.level.BlockEvent.BreakEvent;
 import net.neoforged.neoforge.event.level.BlockEvent.EntityPlaceEvent;
@@ -44,8 +50,11 @@ public final class NationEvents {
    private static final int MAINTENANCE_INTERVAL_TICKS = 12000;
    private static final double CAPITAL_INCOME = 12.0;
    private static final double MAINTENANCE_PER_CLAIM = 8.0;
-   private static final double ACCESS_FEE = 5.0;
+   private static final double ACCESS_FEE = 25.0;
    private static final double CITY_INCOME = 6.0;
+   private static final double BUILD_REWARD = 0.05;
+   private static final double BUILD_REWARD_CHANCE = 0.2;
+   private static final long WAR_ACCESS_PASS_TICKS = 80L;
    private static final int OPAC_SYNC_RETRY_INTERVAL_TICKS = 200;
    private static final Random RANDOM = new Random();
    private static long nextIncomeTick = -1L;
@@ -121,39 +130,80 @@ public final class NationEvents {
          } else {
             nextOpacSyncTick = Math.min(nextOpacSyncTick, var4 + 40L);
          }
+
+         player.refreshTabListName();
+      }
+   }
+
+   @SubscribeEvent
+   public static void tabListName(TabListNameFormat event) {
+      if (event.getEntity() instanceof ServerPlayer player) {
+         try {
+            Optional<NationStore.Nation> nation = NationStore.get().nationOf(player.getUUID());
+            if (nation.isPresent()) {
+               event.setDisplayName(
+                  Component.literal("[" + nation.get().name + "] ")
+                     .withStyle(ChatFormatting.GOLD)
+                     .append(Component.literal(player.getGameProfile().getName()).withStyle(ChatFormatting.WHITE))
+               );
+            } else {
+               event.setDisplayName(
+                  Component.literal("[No Nation] ")
+                     .withStyle(ChatFormatting.DARK_GRAY)
+                     .append(Component.literal(player.getGameProfile().getName()).withStyle(ChatFormatting.GRAY))
+               );
+            }
+         } catch (IllegalStateException var3) {
+            event.setDisplayName(null);
+         }
       }
    }
 
    @SubscribeEvent
    public static void playerTick(net.neoforged.neoforge.event.tick.PlayerTickEvent.Post event) {
       if (event.getEntity() instanceof ServerPlayer player && player.tickCount % 20 == 0) {
+         if (player.tickCount % 100 == 0) {
+            player.refreshTabListName();
+         }
+
+         grantWarAccessIfNeeded(player, (long)player.getServer().getTickCount());
          applyClaimedLandEffects(player);
          handleCaptureTick(player);
          return;
       }
    }
 
-   @SubscribeEvent
+   @SubscribeEvent(
+      priority = EventPriority.HIGHEST
+   )
    public static void blockBreak(BreakEvent event) {
-      if (!event.isCanceled() && event.getPlayer() instanceof ServerPlayer player) {
-         double reward = rewardForBrokenBlock(player, event.getState());
-         if (!(reward <= 0.0)) {
-            NationStore.get().addPlayerMoney(player.getUUID(), reward);
-            player.displayClientMessage(Component.literal("+$" + NationStore.roundMoney(reward)), true);
+      if (event.getPlayer() instanceof ServerPlayer player) {
+         grantWarAccessIfNeeded(player, (long)player.getServer().getTickCount());
+         if (!event.isCanceled()) {
+            double reward = rewardForBrokenBlock(player, event.getState());
+            if (!(reward <= 0.0)) {
+               NationStore.get().addPlayerMoney(player.getUUID(), reward);
+               player.displayClientMessage(Component.literal("+$" + NationStore.roundMoney(reward)), true);
+            }
          }
       }
    }
 
-   @SubscribeEvent
+   @SubscribeEvent(
+      priority = EventPriority.HIGHEST
+   )
    public static void blockPlace(EntityPlaceEvent event) {
       if (event.getEntity() instanceof ServerPlayer player) {
          long tick = (long)player.getServer().getTickCount();
+         grantWarAccessIfNeeded(player, tick);
          String key = player.getUUID() + ":build";
          if (BUILD_REWARD_COOLDOWNS.getOrDefault(key, 0L) <= tick) {
             BUILD_REWARD_COOLDOWNS.put(key, tick + 20L);
-            double reward = NationStore.roundMoney(0.25 * incomeMultiplier(player));
-            NationStore.get().addPlayerMoney(player.getUUID(), reward);
-            player.displayClientMessage(Component.literal("+$" + reward + " building"), true);
+            if (!(RANDOM.nextDouble() > 0.2)) {
+               double reward = NationStore.roundMoney(0.05 * incomeMultiplier(player));
+               NationStore.get().addPlayerMoney(player.getUUID(), reward);
+               player.displayClientMessage(Component.literal("+$" + reward + " building"), true);
+            }
          }
       }
    }
@@ -172,22 +222,33 @@ public final class NationEvents {
             Optional<NationStore.Nation> owner = store.nationOwning(claim);
             if (!owner.isEmpty() && !store.isMember(player.getUUID(), owner.get())) {
                long tick = (long)player.getServer().getTickCount();
-               String cooldownKey = player.getUUID() + ":" + pos.asLong();
-               if (ACCESS_COOLDOWNS.getOrDefault(cooldownKey, 0L) <= tick) {
-                  if (!store.withdrawPlayerMoney(player.getUUID(), 5.0)) {
-                     event.setCanceled(true);
-                     player.sendSystemMessage(Component.literal("[NationWars] You need $5.0 to open this in " + owner.get().name + "."));
-                  } else {
-                     ACCESS_COOLDOWNS.put(cooldownKey, tick + 60L);
-                     grantTemporaryOpacPass(player, tick + 60L);
-                     player.displayClientMessage(Component.literal("-$5.0 access fee"), true);
-                     store.notifyNation(
-                        player.getServer(),
-                        owner.get(),
-                        Component.literal(
-                           player.getGameProfile().getName() + " paid to open a protected block at " + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + "."
-                        )
-                     );
+               if (isActiveWarClaim(player, owner.get())) {
+                  grantTemporaryOpacPass(player, tick + 80L);
+               } else {
+                  String cooldownKey = player.getUUID() + ":" + pos.asLong();
+                  if (ACCESS_COOLDOWNS.getOrDefault(cooldownKey, 0L) <= tick) {
+                     if (!store.withdrawPlayerMoney(player.getUUID(), 25.0)) {
+                        event.setCanceled(true);
+                        player.sendSystemMessage(Component.literal("[NationWars] You need $25.0 to open this in " + owner.get().name + "."));
+                     } else {
+                        ACCESS_COOLDOWNS.put(cooldownKey, tick + 60L);
+                        grantTemporaryOpacPass(player, tick + 60L);
+                        player.displayClientMessage(Component.literal("-$25.0 access fee"), true);
+                        store.notifyNation(
+                           player.getServer(),
+                           owner.get(),
+                           Component.literal(
+                              player.getGameProfile().getName()
+                                 + " paid to open a protected block at "
+                                 + pos.getX()
+                                 + ", "
+                                 + pos.getY()
+                                 + ", "
+                                 + pos.getZ()
+                                 + "."
+                           )
+                        );
+                     }
                   }
                }
             }
@@ -260,23 +321,24 @@ public final class NationEvents {
          clearCapture(player);
       } else {
          ClaimKey claim = ClaimKey.of(player.serverLevel(), player.chunkPosition());
+         clearCaptureExcept(player, claim.id());
          Optional<NationStore.Nation> defender = store.nationOwning(claim);
          if (!defender.isEmpty() && !defender.get().id.equals(attacker.get().id)) {
             Optional<NationStore.War> maybeWar = store.activeWarForCapture(attacker.get(), defender.get());
             if (maybeWar.isEmpty()) {
                clearCapture(player);
-            } else if (defenderPresent(player, defender.get())) {
-               player.displayClientMessage(Component.literal("Capture blocked by defender presence"), true);
-               clearCapture(player);
             } else {
-               NationStore.War war = maybeWar.get();
                String progressKey = player.getUUID() + ":" + claim.id();
                NationEvents.CaptureProgress progress = CAPTURE_PROGRESS.computeIfAbsent(
                   progressKey, ignored -> new NationEvents.CaptureProgress(attacker.get().id, defender.get().id, claim.id())
                );
-               if (!progress.attackerNation.equals(attacker.get().id)) {
+               if (!progress.attackerNation.equals(attacker.get().id) || !progress.defenderNation.equals(defender.get().id)) {
                   CAPTURE_PROGRESS.remove(progressKey);
+               } else if (defenderPresent(player, defender.get())) {
+                  int required = requiredCaptureSeconds(player, attacker.get(), defender.get(), maybeWar.get(), claim);
+                  player.displayClientMessage(Component.literal("Capture paused " + progress.seconds + "/" + required + "s"), true);
                } else {
+                  NationStore.War war = maybeWar.get();
                   progress.seconds++;
                   int required = requiredCaptureSeconds(player, attacker.get(), defender.get(), war, claim);
                   player.displayClientMessage(Component.literal("Capturing " + defender.get().name + " " + progress.seconds + "/" + required + "s"), true);
@@ -381,6 +443,12 @@ public final class NationEvents {
       CAPTURE_PROGRESS.keySet().removeIf(key -> key.startsWith(prefix));
    }
 
+   private static void clearCaptureExcept(ServerPlayer player, String claimId) {
+      String prefix = player.getUUID() + ":";
+      String current = prefix + claimId;
+      CAPTURE_PROGRESS.keySet().removeIf(key -> key.startsWith(prefix) && !key.equals(current));
+   }
+
    private static void applyClaimedLandEffects(ServerPlayer player) {
       NationStore store = NationStore.get();
       Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
@@ -417,13 +485,55 @@ public final class NationEvents {
       Block block = state.getBlock();
       String path = BuiltInRegistries.BLOCK.getKey(block).getPath().toLowerCase();
       double base = 0.0;
-      if (path.endsWith("_ore") || path.equals("ancient_debris")) {
-         base = 3.0;
-      } else if (block instanceof CropBlock crop && crop.isMaxAge(state)) {
-         base = 1.0;
+      if (!path.endsWith("_ore") && !path.equals("ancient_debris")) {
+         if (block instanceof CropBlock crop && crop.isMaxAge(state)) {
+            base = 1.0;
+         }
+      } else {
+         if (hasSilkTouch(player)) {
+            return 0.0;
+         }
+
+         base = oreReward(path);
       }
 
       return NationStore.roundMoney(base * incomeMultiplier(player));
+   }
+
+   private static double oreReward(String path) {
+      if (path.contains("diamond")) {
+         return 12.0;
+      } else if (path.contains("emerald")) {
+         return 10.0;
+      } else if (path.equals("ancient_debris")) {
+         return 20.0;
+      } else if (path.contains("gold")) {
+         return 6.0;
+      } else if (path.contains("lapis") || path.contains("redstone")) {
+         return 4.0;
+      } else if (path.contains("iron")) {
+         return 3.0;
+      } else if (path.contains("copper") || path.contains("quartz")) {
+         return 2.0;
+      } else {
+         return path.contains("coal") ? 1.0 : 2.0;
+      }
+   }
+
+   private static boolean hasSilkTouch(ServerPlayer player) {
+      ItemStack tool = player.getMainHandItem();
+      if (tool.isEmpty()) {
+         return false;
+      } else {
+         try {
+            return EnchantmentHelper.getItemEnchantmentLevel(
+                  player.registryAccess().lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(Enchantments.SILK_TOUCH), tool
+               )
+               > 0;
+         } catch (RuntimeException var3) {
+            return false;
+         }
+      }
    }
 
    private static double incomeMultiplier(ServerPlayer player) {
@@ -437,6 +547,26 @@ public final class NationEvents {
          || block instanceof ChestBlock
          || block instanceof BarrelBlock
          || block instanceof ShulkerBoxBlock;
+   }
+
+   private static void grantWarAccessIfNeeded(ServerPlayer player, long tick) {
+      NationStore store = NationStore.get();
+      Optional<NationStore.Nation> own = store.nationOf(player.getUUID());
+      if (!own.isEmpty()) {
+         ClaimKey claim = ClaimKey.of(player.serverLevel(), player.chunkPosition());
+         Optional<NationStore.Nation> owner = store.nationOwning(claim);
+         if (owner.isPresent() && !owner.get().id.equals(own.get().id) && store.activeWarForCapture(own.get(), owner.get()).isPresent()) {
+            grantTemporaryOpacPass(player, tick + 80L);
+         }
+      }
+   }
+
+   private static boolean isActiveWarClaim(ServerPlayer player, NationStore.Nation owner) {
+      NationStore store = NationStore.get();
+      return store.nationOf(player.getUUID())
+         .filter(nation -> !nation.id.equals(owner.id))
+         .flatMap(nation -> store.activeWarForCapture(nation, owner))
+         .isPresent();
    }
 
    private static void scheduleOpacSync(long tick, int retries) {

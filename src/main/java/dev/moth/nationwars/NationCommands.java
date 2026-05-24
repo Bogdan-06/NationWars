@@ -70,7 +70,10 @@ public final class NationCommands {
                                              "nation"
                                           )
                                           .requires(source -> source.hasPermission(0)))
-                                       .then(Commands.literal("doctrines").executes(NationCommands::doctrines)))
+                                       .then(
+                                          ((LiteralArgumentBuilder)Commands.literal("doctrines").executes(NationCommands::openDoctrinesMenu))
+                                             .then(Commands.literal("list").executes(NationCommands::doctrines))
+                                       ))
                                     .then(
                                        ((LiteralArgumentBuilder)Commands.literal("syncopac").requires(source -> source.hasPermission(2)))
                                           .executes(NationCommands::syncOpac)
@@ -113,10 +116,11 @@ public final class NationCommands {
             .executes(NationCommands::alliances)
       );
       dispatcher.register(
-         (LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal(
-                                                "war"
-                                             )
-                                             .requires(source -> source.hasPermission(0)))
+         (LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal(
+                                                   "war"
+                                                )
+                                                .requires(source -> source.hasPermission(0)))
+                                             .executes(NationCommands::warOverview))
                                           .then(
                                              Commands.literal("justify")
                                                 .then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::justifyWar))
@@ -211,6 +215,7 @@ public final class NationCommands {
             return false;
          } else {
             NationStore.Nation nation = store.createNation(player, name, doctrine, capital);
+            player.refreshTabListName();
             ok(player, "Created " + nation.name + " with " + doctrine.displayName + ". Capital: " + capital.shortName());
             return true;
          }
@@ -246,6 +251,7 @@ public final class NationCommands {
             return 0;
          } else {
             store.addMember(player.getUUID(), nation.get());
+            player.refreshTabListName();
             ok(player, "Joined " + nation.get().name + ".");
             return 1;
          }
@@ -433,6 +439,12 @@ public final class NationCommands {
       return 1;
    }
 
+   private static int openDoctrinesMenu(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+      player.openMenu(new SimpleMenuProvider((containerId, inventory, viewer) -> new DoctrineMenu(containerId, inventory), Component.literal("Doctrines")));
+      return 1;
+   }
+
    private static int syncOpac(CommandContext<CommandSourceStack> context) {
       OpacClaimsBridge.syncAll(((CommandSourceStack)context.getSource()).getServer(), NationStore.get());
       ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("NationWars claims synced to Open Parties and Claims."), true);
@@ -507,7 +519,6 @@ public final class NationCommands {
          ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("Nations:"), false);
 
          for (NationStore.Nation nation : nations) {
-            Doctrine doctrine = nation.doctrine();
             ((CommandSourceStack)context.getSource())
                .sendSuccess(
                   () -> Component.literal(
@@ -515,12 +526,10 @@ public final class NationCommands {
                            + nation.name
                            + " | leader: "
                            + nation.ownerName
-                           + " | "
-                           + doctrine.displayName
-                           + " | "
-                           + doctrine.ideology.displayName
                            + " | claims: "
                            + store.claimCount(nation)
+                           + " | members: "
+                           + nation.members.size()
                      ),
                   false
                );
@@ -536,10 +545,17 @@ public final class NationCommands {
       Optional<NationStore.Nation> spyNation = store.nationOf(player.getUUID());
       Optional<NationStore.Nation> target = store.nationByName(StringArgumentType.getString(context, "country"));
       if (!spyNation.isEmpty() && !target.isEmpty() && !spyNation.get().id.equals(target.get().id)) {
-         long completeTick = (long)player.getServer().getTickCount() + 2400L;
-         NationStore.SpyMission mission = store.createSpyMission(player, spyNation.get(), target.get(), completeTick);
-         ok(player, "Spy mission #" + mission.id + " started against " + target.get().name + ". Report in 120 seconds.");
-         return 1;
+         Optional<NationStore.SpyMission> existingMission = store.activeSpyMission(player.getUUID());
+         if (existingMission.isPresent()) {
+            long secondsLeft = Math.max(1L, (existingMission.get().completeTick - (long)player.getServer().getTickCount()) / 20L);
+            fail(player, "You already have spy mission #" + existingMission.get().id + " running. " + secondsLeft + " seconds left.");
+            return 0;
+         } else {
+            long completeTick = (long)player.getServer().getTickCount() + 2400L;
+            NationStore.SpyMission mission = store.createSpyMission(player, spyNation.get(), target.get(), completeTick);
+            ok(player, "Spy mission #" + mission.id + " started against " + target.get().name + ". Report in 120 seconds.");
+            return 1;
+         }
       } else {
          fail(player, "Pick another existing nation to spy on.");
          return 0;
@@ -1021,6 +1037,17 @@ public final class NationCommands {
       }
    }
 
+   private static int warOverview(CommandContext<CommandSourceStack> context) {
+      ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("War commands:"), false);
+      ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("/war status"), false);
+      ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("/war justify <nation> | /war declare <nation>"), false);
+      ((CommandSourceStack)context.getSource())
+         .sendSuccess(() -> Component.literal("/war join <nation> | /war acceptjoin <nation> | /war rejectjoin <nation>"), false);
+      ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("/war defend <nation> | /war declinedefense <nation>"), false);
+      ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("/peace <nation> | /surrender <nation>"), false);
+      return 1;
+   }
+
    private static int warStatus(CommandContext<CommandSourceStack> context) {
       NationStore store = NationStore.get();
       List<NationStore.War> wars = store.wars().stream().sorted(Comparator.comparing(warx -> warx.id)).toList();
@@ -1031,22 +1058,23 @@ public final class NationCommands {
          MinecraftServer server = ((CommandSourceStack)context.getSource()).getServer();
 
          for (NationStore.War war : wars) {
-            String state;
-            if (war.active) {
-               state = "active | attackers: " + nationNames(store, war.attackerSide) + " | defenders: " + nationNames(store, war.defenderSide);
-               if (!war.joinRequests.isEmpty()) {
-                  state = state + " | join requests: " + nationNames(store, war.joinRequests.keySet());
-               }
-            } else if (war.pendingDefenderResponse) {
-               state = "waiting for defender response";
-            } else {
-               state = "justifying, " + Math.max(0L, (war.justificationCompleteTick - (long)server.getTickCount()) / 20L) + "s left";
-            }
-
             String attacker = store.nationById(war.attacker).map(nation -> nation.name).orElse(war.attacker);
             String defender = store.nationById(war.defender).map(nation -> nation.name).orElse(war.defender);
-            String line = attacker + " -> " + defender + ": " + state;
-            ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal(line), false);
+            ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal(attacker + " vs " + defender), false);
+            if (war.active) {
+               ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("  active"), false);
+               ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("  attackers: " + nationNames(store, war.attackerSide)), false);
+               ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("  defenders: " + nationNames(store, war.defenderSide)), false);
+               if (!war.joinRequests.isEmpty()) {
+                  ((CommandSourceStack)context.getSource())
+                     .sendSuccess(() -> Component.literal("  pending: " + nationNames(store, war.joinRequests.keySet())), false);
+               }
+            } else if (war.pendingDefenderResponse) {
+               ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("  waiting for defender response"), false);
+            } else {
+               long secondsLeft = Math.max(0L, (war.justificationCompleteTick - (long)server.getTickCount()) / 20L);
+               ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("  justifying: " + secondsLeft + "s left"), false);
+            }
          }
 
          return 1;

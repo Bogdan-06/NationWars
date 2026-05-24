@@ -664,6 +664,11 @@ public final class NationStore {
       return mission;
    }
 
+   public Optional<NationStore.SpyMission> activeSpyMission(UUID spyPlayer) {
+      String id = spyPlayer.toString();
+      return this.state.spyMissions.stream().filter(mission -> id.equals(mission.spyPlayer)).findFirst();
+   }
+
    public List<NationStore.SpyMission> dueSpyMissions(long tick) {
       return this.state.spyMissions.stream().filter(mission -> mission.completeTick <= tick).sorted(Comparator.comparingInt(mission -> mission.id)).toList();
    }
