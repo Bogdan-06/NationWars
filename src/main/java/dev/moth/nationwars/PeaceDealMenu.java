@@ -295,24 +295,30 @@ public final class PeaceDealMenu extends AbstractContainerMenu {
    private void sendDeal(ServerPlayer player) {
       NationStore store = NationStore.get();
       if (this.war.active && store.isWarParticipant(this.war, this.ownNation) && store.isWarParticipant(this.war, this.otherNation)) {
-         NationStore.PeaceDeal sent = copyDeal(this.draft);
-         sent.proposer = this.ownNation.id;
-         sent.receiver = this.otherNation.id;
-         double fee = this.peaceOfferFee();
-         if (this.ownNation.balance + 1.0E-4 < fee) {
-            player.sendSystemMessage(Component.literal("[NationWars] Nation treasury needs $" + NationStore.roundMoney(fee) + " to send this peace deal."));
+         long cooldownUntil = store.peaceCooldownUntil(this.ownNation, this.otherNation);
+         if (cooldownUntil > (long)player.getServer().getTickCount()) {
+            long secondsLeft = Math.max(1L, (cooldownUntil - (long)player.getServer().getTickCount()) / 20L);
+            player.sendSystemMessage(Component.literal("[NationWars] Your last peace offer was rejected. Try again in " + secondsLeft + " seconds."));
          } else {
-            this.ownNation.balance = NationStore.roundMoney(this.ownNation.balance - fee);
-            store.setPeaceDeal(this.war, sent);
-            store.notifyNation(
-               player.getServer(),
-               this.otherNation,
-               Component.literal(
-                  "[NationWars] " + this.ownNation.name + " sent a peace deal: " + summary(sent) + " Use /peace " + this.ownNation.id + " to review it."
-               )
-            );
-            store.notifyNation(player.getServer(), this.ownNation, Component.literal("[NationWars] Peace deal sent to " + this.otherNation.name + "."));
-            player.closeContainer();
+            NationStore.PeaceDeal sent = copyDeal(this.draft);
+            sent.proposer = this.ownNation.id;
+            sent.receiver = this.otherNation.id;
+            double fee = this.peaceOfferFee();
+            if (this.ownNation.balance + 1.0E-4 < fee) {
+               player.sendSystemMessage(Component.literal("[NationWars] Nation treasury needs $" + NationStore.roundMoney(fee) + " to send this peace deal."));
+            } else {
+               this.ownNation.balance = NationStore.roundMoney(this.ownNation.balance - fee);
+               store.setPeaceDeal(this.war, sent);
+               store.notifyNation(
+                  player.getServer(),
+                  this.otherNation,
+                  Component.literal(
+                     "[NationWars] " + this.ownNation.name + " sent a peace deal: " + summary(sent) + " Use /peace " + this.ownNation.id + " to review it."
+                  )
+               );
+               store.notifyNation(player.getServer(), this.ownNation, Component.literal("[NationWars] Peace deal sent to " + this.otherNation.name + "."));
+               player.closeContainer();
+            }
          }
       } else {
          player.sendSystemMessage(Component.literal("[NationWars] That war is no longer active."));

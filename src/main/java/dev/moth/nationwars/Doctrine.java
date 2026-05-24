@@ -137,7 +137,7 @@ public enum Doctrine {
       false
    ),
    ITALIAN(
-      "italian", "Italy", Ideology.FASCIST, 0.95, 1.0, 1.0, 0.9, 1.0, 4, 420, 60, 1.15, 1.0, 1.0, 1.0, 1.0, false, false, true, false, true, true, false, false
+      "italian", "Italy", Ideology.FASCIST, 0.95, 1.0, 1.0, 0.9, 1.0, 4, 420, 60, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, true, true, false, false
    ),
    ROMANIAN(
       "romanian",

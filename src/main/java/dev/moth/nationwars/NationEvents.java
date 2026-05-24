@@ -5,6 +5,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
 import java.util.Map.Entry;
 import net.minecraft.ChatFormatting;
@@ -54,9 +55,53 @@ public final class NationEvents {
    private static final double CITY_INCOME = 6.0;
    private static final double BUILD_REWARD = 0.05;
    private static final double BUILD_REWARD_CHANCE = 0.2;
+   private static final double ITALIAN_OWNED_BUILD_REWARD_MULTIPLIER = 3.0;
+   private static final double CAPTURED_CLAIM_MAINTENANCE_MULTIPLIER = 2.0;
    private static final long WAR_ACCESS_PASS_TICKS = 80L;
    private static final int OPAC_SYNC_RETRY_INTERVAL_TICKS = 200;
    private static final Random RANDOM = new Random();
+   private static final Set<String> NO_BUILD_REWARD_BLOCKS = Set.of(
+      "dirt",
+      "grass_block",
+      "coarse_dirt",
+      "rooted_dirt",
+      "podzol",
+      "mycelium",
+      "mud",
+      "sand",
+      "red_sand",
+      "gravel",
+      "clay",
+      "stone",
+      "cobblestone",
+      "deepslate",
+      "cobbled_deepslate",
+      "netherrack",
+      "end_stone",
+      "snow",
+      "snow_block",
+      "ice",
+      "packed_ice",
+      "blue_ice",
+      "oak_leaves",
+      "spruce_leaves",
+      "birch_leaves",
+      "jungle_leaves",
+      "acacia_leaves",
+      "dark_oak_leaves",
+      "mangrove_leaves",
+      "cherry_leaves",
+      "azalea_leaves",
+      "flowering_azalea_leaves",
+      "short_grass",
+      "tall_grass",
+      "fern",
+      "large_fern",
+      "torch",
+      "soul_torch",
+      "redstone_torch",
+      "scaffolding"
+   );
    private static long nextIncomeTick = -1L;
    private static long nextMaintenanceTick = -1L;
    private static long nextOpacSyncTick = -1L;
@@ -71,6 +116,7 @@ public final class NationEvents {
 
    @SubscribeEvent
    public static void serverStarted(ServerStartedEvent event) {
+      OpacClaimsBridge.forceMaxPlayerClaimsZero();
       NationStore.load(event.getServer());
       long tick = (long)event.getServer().getTickCount();
       nextIncomeTick = tick + 1200L;
@@ -117,6 +163,7 @@ public final class NationEvents {
          nextMaintenanceTick = tick + 12000L;
       }
 
+      decayCaptureProgress(server, tick);
       completeSpyMissions(server, tick);
       cleanupCooldowns(server, tick);
    }
@@ -194,15 +241,17 @@ public final class NationEvents {
    )
    public static void blockPlace(EntityPlaceEvent event) {
       if (event.getEntity() instanceof ServerPlayer player) {
-         long tick = (long)player.getServer().getTickCount();
-         grantWarAccessIfNeeded(player, tick);
-         String key = player.getUUID() + ":build";
-         if (BUILD_REWARD_COOLDOWNS.getOrDefault(key, 0L) <= tick) {
-            BUILD_REWARD_COOLDOWNS.put(key, tick + 20L);
-            if (!(RANDOM.nextDouble() > 0.2)) {
-               double reward = NationStore.roundMoney(0.05 * incomeMultiplier(player));
-               NationStore.get().addPlayerMoney(player.getUUID(), reward);
-               player.displayClientMessage(Component.literal("+$" + reward + " building"), true);
+         if (!doesNotPayBuildReward(event.getPlacedBlock().getBlock())) {
+            long tick = (long)player.getServer().getTickCount();
+            grantWarAccessIfNeeded(player, tick);
+            String key = player.getUUID() + ":build";
+            if (BUILD_REWARD_COOLDOWNS.getOrDefault(key, 0L) <= tick) {
+               BUILD_REWARD_COOLDOWNS.put(key, tick + 20L);
+               if (!(RANDOM.nextDouble() > 0.2)) {
+                  double reward = NationStore.roundMoney(0.05 * incomeMultiplier(player) * buildRewardMultiplier(player, event.getPos()));
+                  NationStore.get().addPlayerMoney(player.getUUID(), reward);
+                  player.displayClientMessage(Component.literal("+$" + reward + " building"), true);
+               }
             }
          }
       }
@@ -293,7 +342,10 @@ public final class NationEvents {
                maintenanceMultiplier *= 1.5;
             }
 
-            double due = NationStore.roundMoney((double)claims * 8.0 * maintenanceMultiplier);
+            int capturedClaims = store.capturedClaimsHeldBy(nation);
+            double normalDue = (double)claims * 8.0 * maintenanceMultiplier;
+            double capturedPremium = (double)capturedClaims * 8.0 * maintenanceMultiplier * 1.0;
+            double due = NationStore.roundMoney(normalDue + capturedPremium);
             if (nation.balance + 1.0E-4 >= due) {
                nation.balance = NationStore.roundMoney(nation.balance - due);
             } else {
@@ -321,13 +373,10 @@ public final class NationEvents {
          clearCapture(player);
       } else {
          ClaimKey claim = ClaimKey.of(player.serverLevel(), player.chunkPosition());
-         clearCaptureExcept(player, claim.id());
          Optional<NationStore.Nation> defender = store.nationOwning(claim);
          if (!defender.isEmpty() && !defender.get().id.equals(attacker.get().id)) {
             Optional<NationStore.War> maybeWar = store.activeWarForCapture(attacker.get(), defender.get());
-            if (maybeWar.isEmpty()) {
-               clearCapture(player);
-            } else {
+            if (!maybeWar.isEmpty()) {
                String progressKey = player.getUUID() + ":" + claim.id();
                NationEvents.CaptureProgress progress = CAPTURE_PROGRESS.computeIfAbsent(
                   progressKey, ignored -> new NationEvents.CaptureProgress(attacker.get().id, defender.get().id, claim.id())
@@ -344,11 +393,20 @@ public final class NationEvents {
                   player.displayClientMessage(Component.literal("Capturing " + defender.get().name + " " + progress.seconds + "/" + required + "s"), true);
                   if (progress.seconds >= required) {
                      int capturingSide = store.sideOf(war, attacker.get());
+                     boolean capitalCaptured = claim.id().equals(defender.get().capitalClaim);
+                     int defenderClaimsBefore = store.claimCount(defender.get());
                      store.transferClaim(claim.id(), attacker.get());
-                     if (capturingSide > 0) {
-                        war.attackerCapturedClaims.add(claim.id());
-                     } else {
-                        war.attackerCapturedClaims.remove(claim.id());
+                     recordWarCapture(store, war, attacker.get(), claim.id(), capturingSide);
+                     if (store.claimCount(defender.get()) <= 0) {
+                        eliminateNation(player.getServer(), store, war, attacker.get(), defender.get());
+                        CAPTURE_PROGRESS.remove(progressKey);
+                        return;
+                     }
+
+                     if (capitalCaptured) {
+                        applyCapitulation(player.getServer(), store, war, attacker.get(), defender.get(), defenderClaimsBefore, capturingSide, 1);
+                        CAPTURE_PROGRESS.remove(progressKey);
+                        return;
                      }
 
                      store.save();
@@ -360,8 +418,6 @@ public final class NationEvents {
                   }
                }
             }
-         } else {
-            clearCapture(player);
          }
       }
    }
@@ -374,6 +430,10 @@ public final class NationEvents {
 
       if (defender.doctrine() == Doctrine.BRITISH && isCoastalClaim(player.serverLevel(), claim)) {
          required *= 0.75;
+      }
+
+      if (defender.doctrine() == Doctrine.ITALIAN && isHillOrMountainClaim(player.serverLevel(), claim)) {
+         required *= 1.25;
       }
 
       if (attacker.doctrine() == Doctrine.ITALIAN && war.attackerCapturedClaims.contains(claim.id())) {
@@ -408,6 +468,23 @@ public final class NationEvents {
       return false;
    }
 
+   private static boolean isHillOrMountainClaim(ServerLevel level, ClaimKey claim) {
+      int startX = claim.x() << 4;
+      int startZ = claim.z() << 4;
+      int minY = Integer.MAX_VALUE;
+      int maxY = Integer.MIN_VALUE;
+
+      for (int x = startX; x < startX + 16; x += 4) {
+         for (int z = startZ; z < startZ + 16; z += 4) {
+            int surfaceY = level.getHeight(Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+            minY = Math.min(minY, surfaceY);
+            maxY = Math.max(maxY, surfaceY);
+         }
+      }
+
+      return maxY >= 95 || maxY - minY >= 18;
+   }
+
    private static int attackersPresent(ServerPlayer reference, NationStore.Nation attacker) {
       int count = 0;
       ChunkPos chunk = reference.chunkPosition();
@@ -436,6 +513,47 @@ public final class NationEvents {
       }
 
       return false;
+   }
+
+   private static void decayCaptureProgress(MinecraftServer server, long tick) {
+      if (tick % 40L == 0L) {
+         NationStore store = NationStore.get();
+         Iterator<Entry<String, NationEvents.CaptureProgress>> iterator = CAPTURE_PROGRESS.entrySet().iterator();
+
+         while (iterator.hasNext()) {
+            Entry<String, NationEvents.CaptureProgress> entry = iterator.next();
+            NationEvents.CaptureProgress progress = entry.getValue();
+
+            ClaimKey claim;
+            UUID playerId;
+            try {
+               claim = ClaimKey.parse(progress.claimId);
+               playerId = UUID.fromString(entry.getKey().substring(0, entry.getKey().indexOf(58)));
+            } catch (RuntimeException var11) {
+               iterator.remove();
+               continue;
+            }
+
+            NationStore.Nation attacker = store.nationById(progress.attackerNation).orElse(null);
+            NationStore.Nation defender = store.nationById(progress.defenderNation).orElse(null);
+            if (attacker == null
+               || defender == null
+               || store.nationOwning(claim).map(owner -> !owner.id.equals(defender.id)).orElse(true)
+               || store.activeWarForCapture(attacker, defender).isEmpty()) {
+               iterator.remove();
+            } else if (!playerStillInClaim(server, playerId, claim)) {
+               progress.seconds--;
+               if (progress.seconds <= 0) {
+                  iterator.remove();
+               }
+            }
+         }
+      }
+   }
+
+   private static boolean playerStillInClaim(MinecraftServer server, UUID playerId, ClaimKey claim) {
+      ServerPlayer player = server.getPlayerList().getPlayer(playerId);
+      return player != null && ClaimKey.of(player.serverLevel(), player.chunkPosition()).equals(claim);
    }
 
    private static void clearCapture(ServerPlayer player) {
@@ -500,6 +618,10 @@ public final class NationEvents {
       return NationStore.roundMoney(base * incomeMultiplier(player));
    }
 
+   private static boolean doesNotPayBuildReward(Block block) {
+      return NO_BUILD_REWARD_BLOCKS.contains(BuiltInRegistries.BLOCK.getKey(block).getPath());
+   }
+
    private static double oreReward(String path) {
       if (path.contains("diamond")) {
          return 12.0;
@@ -536,6 +658,17 @@ public final class NationEvents {
       }
    }
 
+   private static double buildRewardMultiplier(ServerPlayer player, BlockPos pos) {
+      NationStore store = NationStore.get();
+      Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
+      if (!nation.isEmpty() && nation.get().doctrine() == Doctrine.ITALIAN) {
+         ClaimKey claim = ClaimKey.of(player.serverLevel(), new ChunkPos(pos));
+         return store.nationOwning(claim).filter(owner -> owner.id.equals(nation.get().id)).map(owner -> 3.0).orElse(1.0);
+      } else {
+         return 1.0;
+      }
+   }
+
    private static double incomeMultiplier(ServerPlayer player) {
       return NationStore.get().nationOf(player.getUUID()).map(nation -> nation.doctrine().incomeMultiplier).orElse(1.0);
    }
@@ -567,6 +700,92 @@ public final class NationEvents {
          .filter(nation -> !nation.id.equals(owner.id))
          .flatMap(nation -> store.activeWarForCapture(nation, owner))
          .isPresent();
+   }
+
+   private static void applyCapitulation(
+      MinecraftServer server,
+      NationStore store,
+      NationStore.War war,
+      NationStore.Nation attacker,
+      NationStore.Nation defender,
+      int defenderClaimsBefore,
+      int capturingSide,
+      int alreadyTransferred
+   ) {
+      int target = Math.max(1, (int)Math.ceil((double)defenderClaimsBefore * 0.25 * defender.doctrine().surrenderLandMultiplier));
+
+      for (int transferred = alreadyTransferred; transferred < target; transferred++) {
+         Optional<String> claim = store.borderClaimsOf(defender).stream().filter(id -> !id.equals(defender.capitalClaim)).findFirst();
+         if (claim.isEmpty()) {
+            break;
+         }
+
+         store.transferClaim(claim.get(), attacker);
+         recordWarCapture(store, war, attacker, claim.get(), capturingSide);
+      }
+
+      store.notifyNation(server, attacker, Component.literal("[NationWars] " + defender.name + " capitulated after losing its capital."));
+      store.notifyNation(server, defender, Component.literal("[NationWars] Your nation capitulated after losing its capital."));
+      if (store.claimCount(defender) <= 0) {
+         eliminateNation(server, store, war, attacker, defender);
+      } else {
+         store.endWar(war);
+      }
+   }
+
+   private static void recordWarCapture(NationStore store, NationStore.War war, NationStore.Nation captor, String claimId, int capturingSide) {
+      store.recordCapturedClaim(war, captor, claimId);
+      if (capturingSide > 0) {
+         war.attackerCapturedClaims.add(claimId);
+      } else {
+         war.attackerCapturedClaims.remove(claimId);
+      }
+
+      store.save();
+   }
+
+   private static void eliminateNation(
+      MinecraftServer server, NationStore store, NationStore.War war, NationStore.Nation conqueror, NationStore.Nation defeated
+   ) {
+      Map<NationStore.Nation, Integer> weights = store.capturedClaimWeightsAgainst(war, defeated, conqueror);
+      int totalWeight = weights.values().stream().mapToInt(Integer::intValue).sum();
+      double loot = defeated.balance;
+      defeated.balance = 0.0;
+
+      try {
+         loot = NationStore.roundMoney(loot + store.confiscatePlayerMoney(UUID.fromString(defeated.owner)));
+      } catch (RuntimeException var17) {
+         loot = NationStore.roundMoney(loot);
+      }
+
+      if (loot > 0.0 && totalWeight > 0) {
+         double distributed = 0.0;
+         int index = 0;
+         int recipientCount = weights.size();
+
+         for (Entry<NationStore.Nation, Integer> entry : weights.entrySet()) {
+            index++;
+            double share = index == recipientCount
+               ? NationStore.roundMoney(loot - distributed)
+               : NationStore.roundMoney(loot * (double)entry.getValue().intValue() / (double)totalWeight);
+            distributed = NationStore.roundMoney(distributed + share);
+            entry.getKey().balance = NationStore.roundMoney(entry.getKey().balance + share);
+            store.notifyNation(
+               server,
+               entry.getKey(),
+               Component.literal("[NationWars] " + defeated.name + " was eliminated. Your nation received $" + share + " from the split.")
+            );
+         }
+      }
+
+      store.notifyNation(server, defeated, Component.literal("[NationWars] Your nation lost all territory and was deleted. You can create a new nation."));
+      store.notifyNation(server, conqueror, Component.literal("[NationWars] " + defeated.name + " lost all territory and was eliminated."));
+      store.endWar(war);
+      store.deleteNation(defeated);
+
+      for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+         player.refreshTabListName();
+      }
    }
 
    private static void scheduleOpacSync(long tick, int retries) {

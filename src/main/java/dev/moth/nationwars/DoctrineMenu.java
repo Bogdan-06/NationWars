@@ -97,7 +97,7 @@ public final class DoctrineMenu extends AbstractContainerMenu {
             lore.add(Component.literal("+ Faster enemy capture"));
             lore.add(Component.literal("+ Shorter war justification"));
             lore.add(Component.literal("- Higher maintenance"));
-            lore.add(Component.literal("- Loses more land on surrender"));
+            lore.add(Component.literal("- Loses more land on surrender/capitulation"));
             break;
          case SOVIET:
             lore.add(Component.literal("+ Cheaper claims and maintenance"));
@@ -125,8 +125,9 @@ public final class DoctrineMenu extends AbstractContainerMenu {
             break;
          case ITALIAN:
             lore.add(Component.literal("+ Speed on owned land"));
-            lore.add(Component.literal("+ Land is harder to conquer"));
-            lore.add(Component.literal("- War declarations can be rejected"));
+            lore.add(Component.literal("+ Better build pay on owned land"));
+            lore.add(Component.literal("+ Hills and mountains are harder to conquer"));
+            lore.add(Component.literal("- Bigger nations can reject your wars"));
             lore.add(Component.literal("- Recaptures take longer"));
             break;
          case ROMANIAN:

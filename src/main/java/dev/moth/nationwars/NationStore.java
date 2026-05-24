@@ -242,6 +242,15 @@ public final class NationStore {
       }
    }
 
+   public double confiscatePlayerMoney(UUID playerId) {
+      this.ensurePlayer(playerId);
+      String id = playerId.toString();
+      double balance = this.state.players.get(id);
+      this.state.players.put(id, 0.0);
+      this.save();
+      return roundMoney(balance);
+   }
+
    public boolean depositToNation(UUID playerId, NationStore.Nation nation, double amount) {
       if (!this.withdrawPlayerMoney(playerId, amount)) {
          return false;
@@ -317,6 +326,147 @@ public final class NationStore {
       }
 
       this.save();
+   }
+
+   public void recordCapturedClaim(NationStore.War war, NationStore.Nation capturingNation, String claimId) {
+      if (war != null && capturingNation != null && claimId != null && !claimId.isBlank()) {
+         ensureWarCaptureMap(war);
+
+         for (Set<String> claims : war.capturedClaimsByNation.values()) {
+            claims.remove(claimId);
+         }
+
+         war.capturedClaimsByNation.computeIfAbsent(capturingNation.id, ignored -> new LinkedHashSet<>()).add(claimId);
+         war.capturedClaimsByNation.entrySet().removeIf(entry -> entry.getValue().isEmpty());
+         this.save();
+      }
+   }
+
+   public void removeCapturedClaim(NationStore.War war, String claimId) {
+      if (war != null && claimId != null && !claimId.isBlank()) {
+         ensureWarCaptureMap(war);
+
+         for (Set<String> claims : war.capturedClaimsByNation.values()) {
+            claims.remove(claimId);
+         }
+
+         war.capturedClaimsByNation.entrySet().removeIf(entry -> entry.getValue().isEmpty());
+         war.attackerCapturedClaims.remove(claimId);
+         this.save();
+      }
+   }
+
+   public Set<String> capturedClaimsBy(NationStore.War war, NationStore.Nation nation) {
+      if (war != null && nation != null) {
+         ensureWarCaptureMap(war);
+         Set<String> claims = war.capturedClaimsByNation.get(nation.id);
+         if (claims != null && !claims.isEmpty()) {
+            Set<String> held = new LinkedHashSet<>();
+
+            for (String claimId : claims) {
+               if (nation.id.equals(this.state.claims.get(claimId))) {
+                  held.add(claimId);
+               }
+            }
+
+            return Set.copyOf(held);
+         } else {
+            return Set.of();
+         }
+      } else {
+         return Set.of();
+      }
+   }
+
+   public int capturedClaimsHeldBy(NationStore.Nation nation) {
+      if (nation == null) {
+         return 0;
+      } else {
+         int count = 0;
+
+         for (NationStore.War war : this.state.wars.values()) {
+            if (war.active) {
+               ensureWarCaptureMap(war);
+               Set<String> claims = war.capturedClaimsByNation.get(nation.id);
+               if (claims != null) {
+                  for (String claimId : claims) {
+                     if (nation.id.equals(this.state.claims.get(claimId))) {
+                        count++;
+                     }
+                  }
+               }
+            }
+         }
+
+         return count;
+      }
+   }
+
+   public Map<NationStore.Nation, Integer> capturedClaimWeightsAgainst(NationStore.War war, NationStore.Nation defeated, NationStore.Nation fallbackRecipient) {
+      Map<NationStore.Nation, Integer> weights = new LinkedHashMap<>();
+      if (war != null && defeated != null) {
+         ensureWarCaptureMap(war);
+         int defeatedSide = this.sideOf(war, defeated);
+
+         for (Entry<String, Set<String>> entry : war.capturedClaimsByNation.entrySet()) {
+            NationStore.Nation captor = this.nationById(entry.getKey()).orElse(null);
+            if (captor != null && this.sideOf(war, captor) != 0 && this.sideOf(war, captor) != defeatedSide) {
+               int held = 0;
+
+               for (String claimId : entry.getValue()) {
+                  if (captor.id.equals(this.state.claims.get(claimId))) {
+                     held++;
+                  }
+               }
+
+               if (held > 0) {
+                  weights.put(captor, held);
+               }
+            }
+         }
+
+         if (weights.isEmpty() && fallbackRecipient != null) {
+            weights.put(fallbackRecipient, 1);
+         }
+
+         return weights;
+      } else {
+         if (fallbackRecipient != null) {
+            weights.put(fallbackRecipient, 1);
+         }
+
+         return weights;
+      }
+   }
+
+   public void deleteNation(NationStore.Nation nation) {
+      if (nation != null) {
+         for (String claimId : new ArrayList<>(this.claimsOf(nation))) {
+            this.state.claims.remove(claimId);
+            OpacClaimsBridge.unmirrorClaim(this.server, nation, ClaimKey.parse(claimId));
+         }
+
+         this.state.nations.remove(nation.id);
+         this.state.playerNation.entrySet().removeIf(entry -> nation.id.equals(entry.getValue()));
+         this.state.alliances.values().removeIf(alliancex -> Objects.equals(alliancex.leader, nation.id));
+
+         for (NationStore.Alliance alliance : this.state.alliances.values()) {
+            alliance.members.remove(nation.id);
+            alliance.invites.remove(nation.id);
+         }
+
+         this.state.wars.values().removeIf(war -> {
+            ensureWarSides(war);
+            return war.attackerSide.contains(nation.id) || war.defenderSide.contains(nation.id);
+         });
+         this.state.wars.values().forEach(war -> {
+            war.joinRequests.remove(nation.id);
+            ensureWarCaptureMap(war);
+            war.capturedClaimsByNation.remove(nation.id);
+            war.capturedClaimsByNation.values().forEach(claims -> claims.removeIf(claimId -> nation.id.equals(this.state.claims.get(claimId))));
+         });
+         this.save();
+      }
    }
 
    public boolean removeBorderClaim(NationStore.Nation nation) {
@@ -419,6 +569,7 @@ public final class NationStore {
                      for (String claimIdxx : new ArrayList<>(war.attackerCapturedClaims)) {
                         if (attacker.id.equals(this.state.claims.get(claimIdxx))) {
                            this.transferClaim(claimIdxx, defender);
+                           this.removeCapturedClaim(war, claimIdxx);
                         }
                      }
                   }
@@ -447,6 +598,17 @@ public final class NationStore {
    public void clearPeaceDeal(NationStore.War war) {
       war.peaceDeal = null;
       this.save();
+   }
+
+   public long peaceCooldownUntil(NationStore.Nation proposer, NationStore.Nation receiver) {
+      return proposer != null && receiver != null ? this.state.peaceCooldowns.getOrDefault(peaceCooldownKey(proposer, receiver), 0L) : 0L;
+   }
+
+   public void setPeaceCooldown(NationStore.Nation proposer, NationStore.Nation receiver, long tick) {
+      if (proposer != null && receiver != null) {
+         this.state.peaceCooldowns.put(peaceCooldownKey(proposer, receiver), tick);
+         this.save();
+      }
    }
 
    public Optional<NationStore.Nation> attacker(NationStore.War war) {
@@ -664,6 +826,15 @@ public final class NationStore {
       return mission;
    }
 
+   public long spyCooldownUntil(UUID spyPlayer) {
+      return this.state.spyCooldowns.getOrDefault(spyPlayer.toString(), 0L);
+   }
+
+   public void setSpyCooldown(UUID spyPlayer, long tick) {
+      this.state.spyCooldowns.put(spyPlayer.toString(), tick);
+      this.save();
+   }
+
    public Optional<NationStore.SpyMission> activeSpyMission(UUID spyPlayer) {
       String id = spyPlayer.toString();
       return this.state.spyMissions.stream().filter(mission -> id.equals(mission.spyPlayer)).findFirst();
@@ -694,6 +865,10 @@ public final class NationStore {
       String a = first.id.compareTo(second.id) <= 0 ? first.id : second.id;
       String b = first.id.compareTo(second.id) <= 0 ? second.id : first.id;
       return a + "->" + b;
+   }
+
+   private static String peaceCooldownKey(NationStore.Nation proposer, NationStore.Nation receiver) {
+      return proposer.id + "->" + receiver.id;
    }
 
    public static double roundMoney(double value) {
@@ -737,6 +912,14 @@ public final class NationStore {
          this.state.spyMissions = new ArrayList<>();
       }
 
+      if (this.state.spyCooldowns == null) {
+         this.state.spyCooldowns = new LinkedHashMap<>();
+      }
+
+      if (this.state.peaceCooldowns == null) {
+         this.state.peaceCooldowns = new LinkedHashMap<>();
+      }
+
       if (this.state.nextSpyMissionId <= 0) {
          this.state.nextSpyMissionId = this.state.spyMissions.stream().map(mission -> mission.id).max(Integer::compareTo).orElse(0) + 1;
       }
@@ -749,6 +932,11 @@ public final class NationStore {
 
          if (war.peaceOffers == null) {
             war.peaceOffers = new LinkedHashSet<>();
+         }
+
+         ensureWarCaptureMap(war);
+         if (war.capturedClaimsByNation.isEmpty() && !war.attackerCapturedClaims.isEmpty() && war.attacker != null && !war.attacker.isBlank()) {
+            war.capturedClaimsByNation.put(war.attacker, new LinkedHashSet<>(war.attackerCapturedClaims));
          }
 
          if (war.peaceDeal != null) {
@@ -791,6 +979,15 @@ public final class NationStore {
             alliance.members.add(alliance.leader);
          }
       }
+   }
+
+   private static void ensureWarCaptureMap(NationStore.War war) {
+      if (war.capturedClaimsByNation == null) {
+         war.capturedClaimsByNation = new LinkedHashMap<>();
+      }
+
+      war.capturedClaimsByNation.replaceAll((id, claims) -> (Set<String>)(claims == null ? new LinkedHashSet<>() : claims));
+      war.capturedClaimsByNation.entrySet().removeIf(entry -> entry.getValue().isEmpty());
    }
 
    private static void ensureWarSides(NationStore.War war) {
@@ -903,6 +1100,8 @@ public final class NationStore {
       public Map<String, String> claims = new LinkedHashMap<>();
       public Map<String, NationStore.War> wars = new LinkedHashMap<>();
       public Map<String, NationStore.Alliance> alliances = new LinkedHashMap<>();
+      public Map<String, Long> spyCooldowns = new LinkedHashMap<>();
+      public Map<String, Long> peaceCooldowns = new LinkedHashMap<>();
       public List<NationStore.SpyMission> spyMissions = new ArrayList<>();
       public List<NationStore.MarketListing> marketListings = new ArrayList<>();
       public int nextListingId = 1;
@@ -922,6 +1121,7 @@ public final class NationStore {
       public Set<String> attackerSide = new LinkedHashSet<>();
       public Set<String> defenderSide = new LinkedHashSet<>();
       public Map<String, String> joinRequests = new LinkedHashMap<>();
+      public Map<String, Set<String>> capturedClaimsByNation = new LinkedHashMap<>();
       public boolean pendingDefenderResponse = false;
    }
 }

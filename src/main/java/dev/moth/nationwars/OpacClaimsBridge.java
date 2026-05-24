@@ -1,16 +1,45 @@
 package dev.moth.nationwars;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.Map.Entry;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
+import net.neoforged.fml.loading.FMLPaths;
 import xaero.pac.common.claims.player.api.IPlayerChunkClaimAPI;
 import xaero.pac.common.server.api.OpenPACServerAPI;
 import xaero.pac.common.server.claims.api.IServerClaimsManagerAPI;
 
 public final class OpacClaimsBridge {
+   private static final Pattern MAX_PLAYER_CLAIMS = Pattern.compile("(?m)^(\\s*maxPlayerClaims\\s*=\\s*)\\d+\\s*$");
+
    private OpacClaimsBridge() {
+   }
+
+   public static void forceMaxPlayerClaimsZero() {
+      Path config = FMLPaths.CONFIGDIR.get().resolve("openpartiesandclaims-server.toml");
+      if (Files.exists(config)) {
+         try {
+            String text = Files.readString(config);
+            Matcher matcher = MAX_PLAYER_CLAIMS.matcher(text);
+            if (!matcher.find()) {
+               return;
+            }
+
+            String updated = matcher.replaceFirst(Matcher.quoteReplacement(matcher.group(1) + "0"));
+            if (!updated.equals(text)) {
+               Files.writeString(config, updated);
+               NationWars.LOGGER.info("Set Open Parties and Claims maxPlayerClaims to 0 in {}", config);
+            }
+         } catch (IOException var4) {
+            NationWars.LOGGER.warn("Could not update Open Parties and Claims maxPlayerClaims setting.", var4);
+         }
+      }
    }
 
    public static boolean canMirrorClaim(MinecraftServer server, ClaimKey claim, UUID opacOwner) {
