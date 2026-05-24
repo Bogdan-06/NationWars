@@ -480,19 +480,12 @@ public final class NationCommands {
             return 0;
          } else {
             NationStore.War war = maybeWar.get();
-            war.peaceOffers.add(own.get().id);
-            if (war.peaceOffers.contains(other.get().id)) {
-               store.endWar(war);
-               store.notifyNation(player.getServer(), own.get(), Component.literal("Peace accepted with " + other.get().name + "."));
-               store.notifyNation(player.getServer(), other.get(), Component.literal("Peace accepted with " + own.get().name + "."));
-            } else {
-               store.save();
-               store.notifyNation(
-                  player.getServer(), other.get(), Component.literal(own.get().name + " offered peace. Use /peace " + own.get().id + " to accept.")
-               );
-               ok(player, "Peace offer sent.");
-            }
-
+            player.openMenu(
+               new SimpleMenuProvider(
+                  (containerId, inventory, viewer) -> new PeaceDealMenu(containerId, inventory, own.get(), other.get(), war),
+                  Component.literal("Offer Peace Deal")
+               )
+            );
             return 1;
          }
       } else {

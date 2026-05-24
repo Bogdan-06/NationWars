@@ -30,7 +30,7 @@ public final class OpacClaimsBridge {
          ownerOf(server, claim)
             .ifPresent(owner -> NationWars.LOGGER.warn("Skipping OPAC mirror for {} because it is already claimed by {}", claim.id(), owner));
       } else {
-         claims(server).claim(dimension(claim), opacOwner, claim.x(), claim.z(), 0, false);
+         claims(server).claim(dimension(claim), opacOwner, 0, claim.x(), claim.z(), false);
       }
    }
 
@@ -53,7 +53,7 @@ public final class OpacClaimsBridge {
          NationWars.LOGGER.warn("Skipping OPAC transfer for {} because it is already claimed by {}", claim.id(), existing.getPlayerId());
       } else {
          claims.unclaim(dimension(claim), claim.x(), claim.z());
-         claims.claim(dimension(claim), nationOwner(newOwner), claim.x(), claim.z(), 0, false);
+         claims.claim(dimension(claim), nationOwner(newOwner), 0, claim.x(), claim.z(), false);
       }
    }
 
@@ -61,7 +61,21 @@ public final class OpacClaimsBridge {
       for (Entry<String, String> entry : store.claimOwnerEntries()) {
          NationStore.Nation nation = store.nationById(entry.getValue()).orElse(null);
          if (nation != null) {
-            mirrorClaim(server, nation, ClaimKey.parse(entry.getKey()));
+            ClaimKey claim = ClaimKey.parse(entry.getKey());
+            removeLegacyMisplacedMirror(server, store, nation, claim);
+            mirrorClaim(server, nation, claim);
+         }
+      }
+   }
+
+   private static void removeLegacyMisplacedMirror(MinecraftServer server, NationStore store, NationStore.Nation nation, ClaimKey claim) {
+      ClaimKey legacy = new ClaimKey(claim.dimension(), claim.z(), 0);
+      if (!legacy.id().equals(claim.id()) && !store.nationOwning(legacy).isPresent()) {
+         IServerClaimsManagerAPI claims = claims(server);
+         IPlayerChunkClaimAPI existing = claims.get(dimension(legacy), legacy.x(), legacy.z());
+         if (existing != null && existing.getPlayerId().equals(nationOwner(nation)) && existing.getSubConfigIndex() == claim.x()) {
+            claims.unclaim(dimension(legacy), legacy.x(), legacy.z());
+            NationWars.LOGGER.info("Removed legacy misplaced OPAC mirror {} for NationWars claim {}", legacy.id(), claim.id());
          }
       }
    }

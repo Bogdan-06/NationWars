@@ -352,6 +352,78 @@ public final class NationStore {
       this.save();
    }
 
+   public boolean applyPeaceDeal(NationStore.War war, NationStore.PeaceDeal deal) {
+      if (war != null && deal != null && war.active) {
+         NationStore.Nation proposer = this.nationById(deal.proposer).orElse(null);
+         NationStore.Nation receiver = this.nationById(deal.receiver).orElse(null);
+         if (proposer != null && receiver != null && this.isWarParticipant(war, proposer) && this.isWarParticipant(war, receiver)) {
+            normalizePeaceDeal(deal);
+            double demandedMoney = roundMoney(Math.max(0.0, deal.demandedMoney));
+            double offeredMoney = roundMoney(Math.max(0.0, deal.offeredMoney));
+            if (receiver.balance + 1.0E-4 < demandedMoney || proposer.balance + 1.0E-4 < offeredMoney) {
+               return false;
+            } else if (!this.claimsStillOwnedBy(deal.demandedClaims, receiver) || !this.claimsStillOwnedBy(deal.offeredClaims, proposer)) {
+               return false;
+            } else if (!this.containsCapital(deal.demandedClaims, receiver) && !this.containsCapital(deal.offeredClaims, proposer)) {
+               if (demandedMoney > 0.0) {
+                  receiver.balance = roundMoney(receiver.balance - demandedMoney);
+                  proposer.balance = roundMoney(proposer.balance + demandedMoney);
+               }
+
+               if (offeredMoney > 0.0) {
+                  proposer.balance = roundMoney(proposer.balance - offeredMoney);
+                  receiver.balance = roundMoney(receiver.balance + offeredMoney);
+               }
+
+               for (String claimId : deal.demandedClaims) {
+                  if (receiver.id.equals(this.state.claims.get(claimId))) {
+                     this.transferClaim(claimId, proposer);
+                  }
+               }
+
+               for (String claimIdx : deal.offeredClaims) {
+                  if (proposer.id.equals(this.state.claims.get(claimIdx))) {
+                     this.transferClaim(claimIdx, receiver);
+                  }
+               }
+
+               if (deal.returnCapturedClaims) {
+                  NationStore.Nation attacker = this.attacker(war).orElse(null);
+                  NationStore.Nation defender = this.defender(war).orElse(null);
+                  if (attacker != null && defender != null) {
+                     for (String claimIdxx : new ArrayList<>(war.attackerCapturedClaims)) {
+                        if (attacker.id.equals(this.state.claims.get(claimIdxx))) {
+                           this.transferClaim(claimIdxx, defender);
+                        }
+                     }
+                  }
+               }
+
+               this.endWar(war);
+               return true;
+            } else {
+               return false;
+            }
+         } else {
+            return false;
+         }
+      } else {
+         return false;
+      }
+   }
+
+   public void setPeaceDeal(NationStore.War war, NationStore.PeaceDeal deal) {
+      normalizePeaceDeal(deal);
+      war.peaceDeal = deal;
+      war.peaceOffers.clear();
+      this.save();
+   }
+
+   public void clearPeaceDeal(NationStore.War war) {
+      war.peaceDeal = null;
+      this.save();
+   }
+
    public Optional<NationStore.Nation> attacker(NationStore.War war) {
       return Optional.ofNullable(this.state.nations.get(war.attacker));
    }
@@ -362,6 +434,10 @@ public final class NationStore {
 
    public Optional<NationStore.War> activeWarForCapture(NationStore.Nation attacker, NationStore.Nation defender) {
       return this.warBetween(attacker, defender).filter(war -> war.active);
+   }
+
+   public boolean isWarParticipant(NationStore.War war, NationStore.Nation nation) {
+      return war != null && nation != null && (nation.id.equals(war.attacker) || nation.id.equals(war.defender));
    }
 
    public void notifyNation(MinecraftServer server, NationStore.Nation nation, Component message) {
@@ -415,6 +491,20 @@ public final class NationStore {
          this.state.marketListings = new ArrayList<>();
       }
 
+      for (NationStore.War war : this.state.wars.values()) {
+         if (war.attackerCapturedClaims == null) {
+            war.attackerCapturedClaims = new LinkedHashSet<>();
+         }
+
+         if (war.peaceOffers == null) {
+            war.peaceOffers = new LinkedHashSet<>();
+         }
+
+         if (war.peaceDeal != null) {
+            normalizePeaceDeal(war.peaceDeal);
+         }
+      }
+
       if (this.state.nextListingId <= 0) {
          this.state.nextListingId = this.state.marketListings.stream().map(listing -> listing.id).max(Integer::compareTo).orElse(0) + 1;
       }
@@ -428,6 +518,33 @@ public final class NationStore {
             nation.members.add(nation.owner);
          }
       }
+   }
+
+   private boolean claimsStillOwnedBy(Set<String> claimIds, NationStore.Nation nation) {
+      for (String claimId : claimIds) {
+         if (!nation.id.equals(this.state.claims.get(claimId))) {
+            return false;
+         }
+      }
+
+      return true;
+   }
+
+   private boolean containsCapital(Set<String> claimIds, NationStore.Nation nation) {
+      return nation.capitalClaim != null && claimIds.contains(nation.capitalClaim);
+   }
+
+   private static void normalizePeaceDeal(NationStore.PeaceDeal deal) {
+      if (deal.demandedClaims == null) {
+         deal.demandedClaims = new LinkedHashSet<>();
+      }
+
+      if (deal.offeredClaims == null) {
+         deal.offeredClaims = new LinkedHashSet<>();
+      }
+
+      deal.demandedMoney = roundMoney(Math.max(0.0, deal.demandedMoney));
+      deal.offeredMoney = roundMoney(Math.max(0.0, deal.offeredMoney));
    }
 
    public static final class MarketListing {
@@ -453,6 +570,16 @@ public final class NationStore {
       }
    }
 
+   public static final class PeaceDeal {
+      public String proposer = "";
+      public String receiver = "";
+      public Set<String> demandedClaims = new LinkedHashSet<>();
+      public Set<String> offeredClaims = new LinkedHashSet<>();
+      public double demandedMoney = 0.0;
+      public double offeredMoney = 0.0;
+      public boolean returnCapturedClaims = false;
+   }
+
    public static final class State {
       public Map<String, NationStore.Nation> nations = new LinkedHashMap<>();
       public Map<String, String> playerNation = new LinkedHashMap<>();
@@ -472,5 +599,6 @@ public final class NationStore {
       public int defenderStartingClaims = 0;
       public Set<String> attackerCapturedClaims = new LinkedHashSet<>();
       public Set<String> peaceOffers = new LinkedHashSet<>();
+      public NationStore.PeaceDeal peaceDeal = null;
    }
 }

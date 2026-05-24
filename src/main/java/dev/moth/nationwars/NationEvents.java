@@ -24,6 +24,7 @@ import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedInEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.RightClickBlock;
 import net.neoforged.neoforge.event.level.BlockEvent.BreakEvent;
 import net.neoforged.neoforge.event.level.BlockEvent.EntityPlaceEvent;
@@ -38,8 +39,11 @@ public final class NationEvents {
    private static final double CAPITAL_INCOME = 12.0;
    private static final double MAINTENANCE_PER_CLAIM = 8.0;
    private static final double ACCESS_FEE = 5.0;
+   private static final int OPAC_SYNC_RETRY_INTERVAL_TICKS = 200;
    private static long nextIncomeTick = -1L;
    private static long nextMaintenanceTick = -1L;
+   private static long nextOpacSyncTick = -1L;
+   private static int opacSyncRetries = 0;
    private static final Map<String, NationEvents.CaptureProgress> CAPTURE_PROGRESS = new HashMap<>();
    private static final Map<String, Long> ACCESS_COOLDOWNS = new HashMap<>();
    private static final Map<String, Long> BUILD_REWARD_COOLDOWNS = new HashMap<>();
@@ -54,6 +58,7 @@ public final class NationEvents {
       long tick = (long)event.getServer().getTickCount();
       nextIncomeTick = tick + 1200L;
       nextMaintenanceTick = tick + 12000L;
+      scheduleOpacSync(tick + 100L, 3);
    }
 
    @SubscribeEvent
@@ -63,6 +68,8 @@ public final class NationEvents {
       CAPTURE_PROGRESS.clear();
       ACCESS_COOLDOWNS.clear();
       BUILD_REWARD_COOLDOWNS.clear();
+      nextOpacSyncTick = -1L;
+      opacSyncRetries = 0;
    }
 
    @SubscribeEvent
@@ -77,6 +84,12 @@ public final class NationEvents {
          nextMaintenanceTick = tick + 12000L;
       }
 
+      if (opacSyncRetries > 0 && tick >= nextOpacSyncTick) {
+         syncOpac(server);
+         opacSyncRetries--;
+         nextOpacSyncTick = opacSyncRetries > 0 ? tick + 200L : -1L;
+      }
+
       if (tick >= nextIncomeTick) {
          payPassiveIncome(server);
          nextIncomeTick = tick + 1200L;
@@ -88,6 +101,18 @@ public final class NationEvents {
       }
 
       cleanupCooldowns(server, tick);
+   }
+
+   @SubscribeEvent
+   public static void playerLoggedIn(PlayerLoggedInEvent event) {
+      if (event.getEntity() instanceof ServerPlayer player) {
+         long var4 = (long)player.getServer().getTickCount();
+         if (opacSyncRetries <= 0) {
+            scheduleOpacSync(var4 + 40L, 1);
+         } else {
+            nextOpacSyncTick = Math.min(nextOpacSyncTick, var4 + 40L);
+         }
+      }
    }
 
    @SubscribeEvent
@@ -281,6 +306,19 @@ public final class NationEvents {
          || block instanceof ChestBlock
          || block instanceof BarrelBlock
          || block instanceof ShulkerBoxBlock;
+   }
+
+   private static void scheduleOpacSync(long tick, int retries) {
+      nextOpacSyncTick = nextOpacSyncTick < 0L ? tick : Math.min(nextOpacSyncTick, tick);
+      opacSyncRetries = Math.max(opacSyncRetries, retries);
+   }
+
+   private static void syncOpac(MinecraftServer server) {
+      try {
+         OpacClaimsBridge.syncAll(server, NationStore.get());
+      } catch (RuntimeException var2) {
+         NationWars.LOGGER.warn("Automatic OPAC claim sync failed; it will retry if retries remain.", var2);
+      }
    }
 
    private static void cleanupCooldowns(MinecraftServer server, long tick) {
