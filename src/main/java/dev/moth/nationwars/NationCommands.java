@@ -1263,7 +1263,11 @@ public final class NationCommands {
                   int target = Math.max(1, (int)Math.ceil((double)store.claimCount(own.get()) * 0.25 * own.get().doctrine().surrenderLandMultiplier));
 
                   for (int transferred = 0; transferred < target; transferred++) {
-                     Optional<String> claim = store.borderClaimsOf(own.get()).stream().filter(id -> !id.equals(own.get().capitalClaim)).findFirst();
+                     Optional<String> claim = store.borderClaimsOf(own.get())
+                        .stream()
+                        .filter(id -> !id.equals(own.get().capitalClaim))
+                        .findFirst()
+                        .or(() -> store.claimsOf(own.get()).stream().findFirst());
                      if (claim.isEmpty()) {
                         break;
                      }
