@@ -110,6 +110,11 @@ public final class MarketMenu extends AbstractContainerMenu {
       ItemStack display = stack.copy();
       List<Component> lore = new ArrayList<>();
       lore.add(Component.literal("Price: $" + NationStore.roundMoney(listing.price)));
+      double buyerPrice = this.adjustedBuyPrice(listing.price, this.playerInventory.player.getUUID());
+      if (Math.abs(buyerPrice - listing.price) > 0.001) {
+         lore.add(Component.literal("Your price: $" + NationStore.roundMoney(buyerPrice)));
+      }
+
       lore.add(Component.literal("Seller: " + listing.sellerName));
       lore.add(Component.literal("Listing #" + listing.id));
       lore.add(Component.literal("Click to buy"));
@@ -133,30 +138,42 @@ public final class MarketMenu extends AbstractContainerMenu {
                store.removeMarketListing(listing.id);
                this.refreshAndSync();
                buyer.sendSystemMessage(Component.literal("[NationWars] That listing was invalid and has been removed."));
-            } else if (!store.withdrawPlayerMoney(buyer.getUUID(), listing.price)) {
-               buyer.sendSystemMessage(Component.literal("[NationWars] You need $" + NationStore.roundMoney(listing.price) + " to buy this."));
-            } else if (!store.removeMarketListing(listing.id)) {
-               store.addPlayerMoney(buyer.getUUID(), listing.price);
-               this.refreshAndSync();
-               buyer.sendSystemMessage(Component.literal("[NationWars] Someone bought that listing first."));
             } else {
-               store.addPlayerMoney(UUID.fromString(listing.seller), listing.price);
-               buyer.getInventory().placeItemBackInInventory(purchased);
-               buyer.sendSystemMessage(
-                  Component.literal(
-                     "[NationWars] Bought "
-                        + purchased.getCount()
-                        + "x "
-                        + purchased.getHoverName().getString()
-                        + " for $"
-                        + NationStore.roundMoney(listing.price)
-                        + "."
-                  )
-               );
-               this.refreshAndSync();
+               double buyerPrice = this.adjustedBuyPrice(listing.price, buyer.getUUID());
+               if (!store.withdrawPlayerMoney(buyer.getUUID(), buyerPrice)) {
+                  buyer.sendSystemMessage(Component.literal("[NationWars] You need $" + NationStore.roundMoney(buyerPrice) + " to buy this."));
+               } else if (!store.removeMarketListing(listing.id)) {
+                  store.addPlayerMoney(buyer.getUUID(), buyerPrice);
+                  this.refreshAndSync();
+                  buyer.sendSystemMessage(Component.literal("[NationWars] Someone bought that listing first."));
+               } else {
+                  double sellerPayout = this.adjustedSellerPayout(listing.price, UUID.fromString(listing.seller));
+                  store.addPlayerMoney(UUID.fromString(listing.seller), sellerPayout);
+                  buyer.getInventory().placeItemBackInInventory(purchased);
+                  buyer.sendSystemMessage(
+                     Component.literal(
+                        "[NationWars] Bought "
+                           + purchased.getCount()
+                           + "x "
+                           + purchased.getHoverName().getString()
+                           + " for $"
+                           + NationStore.roundMoney(buyerPrice)
+                           + "."
+                     )
+                  );
+                  this.refreshAndSync();
+               }
             }
          }
       }
+   }
+
+   private double adjustedBuyPrice(double price, UUID buyer) {
+      return NationStore.roundMoney(price * NationStore.get().nationOf(buyer).map(nation -> nation.doctrine().marketBuyMultiplier).orElse(1.0));
+   }
+
+   private double adjustedSellerPayout(double price, UUID seller) {
+      return NationStore.roundMoney(price * NationStore.get().nationOf(seller).map(nation -> nation.doctrine().marketSellMultiplier).orElse(1.0));
    }
 
    private void refreshAndSync() {

@@ -112,6 +112,7 @@ public final class NationCreateMenu extends AbstractContainerMenu {
       stack.set(DataComponents.CUSTOM_NAME, Component.literal(doctrine.displayName));
       List<Component> lore = new ArrayList<>();
       lore.add(Component.literal("Creates: " + this.nationName));
+      lore.add(Component.literal("Ideology: " + doctrine.ideology.displayName));
       lore.add(Component.literal("Free claims: " + doctrine.freeClaims));
       lore.add(Component.literal("Income x" + doctrine.incomeMultiplier));
       lore.add(Component.literal("Claim cost x" + doctrine.claimCostMultiplier));
@@ -139,8 +140,10 @@ public final class NationCreateMenu extends AbstractContainerMenu {
       return switch (doctrine) {
          case AMERICAN -> Items.DIAMOND;
          case SOVIET -> Items.REDSTONE_BLOCK;
+         case FRENCH -> Items.BLUE_BANNER;
          case BRITISH -> Items.SHIELD;
          case GERMAN -> Items.IRON_SWORD;
+         case ITALIAN -> Items.GREEN_BANNER;
          case ROMANIAN -> Items.EMERALD;
       };
    }

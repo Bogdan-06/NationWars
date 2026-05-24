@@ -4,14 +4,19 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Random;
 import java.util.UUID;
 import java.util.Map.Entry;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.BlockPos.MutableBlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.BarrelBlock;
 import net.minecraft.world.level.block.Block;
@@ -22,6 +27,7 @@ import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.levelgen.Heightmap.Types;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedInEvent;
@@ -39,7 +45,9 @@ public final class NationEvents {
    private static final double CAPITAL_INCOME = 12.0;
    private static final double MAINTENANCE_PER_CLAIM = 8.0;
    private static final double ACCESS_FEE = 5.0;
+   private static final double CITY_INCOME = 6.0;
    private static final int OPAC_SYNC_RETRY_INTERVAL_TICKS = 200;
+   private static final Random RANDOM = new Random();
    private static long nextIncomeTick = -1L;
    private static long nextMaintenanceTick = -1L;
    private static long nextOpacSyncTick = -1L;
@@ -100,6 +108,7 @@ public final class NationEvents {
          nextMaintenanceTick = tick + 12000L;
       }
 
+      completeSpyMissions(server, tick);
       cleanupCooldowns(server, tick);
    }
 
@@ -118,6 +127,7 @@ public final class NationEvents {
    @SubscribeEvent
    public static void playerTick(net.neoforged.neoforge.event.tick.PlayerTickEvent.Post event) {
       if (event.getEntity() instanceof ServerPlayer player && player.tickCount % 20 == 0) {
+         applyClaimedLandEffects(player);
          handleCaptureTick(player);
          return;
       }
@@ -189,8 +199,14 @@ public final class NationEvents {
       NationStore store = NationStore.get();
 
       for (NationStore.Nation nation : store.nations()) {
-         if (nation.capitalClaim != null && !nation.capitalClaim.isBlank()) {
+         if (nation.doctrine().capitalProducesIncome && nation.capitalClaim != null && !nation.capitalClaim.isBlank()) {
             nation.balance = NationStore.roundMoney(nation.balance + 12.0 * nation.doctrine().incomeMultiplier);
+         }
+
+         for (String cityClaim : nation.cityClaims) {
+            if (store.claimsOf(nation).contains(cityClaim)) {
+               nation.balance = NationStore.roundMoney(nation.balance + 6.0 * nation.doctrine().incomeMultiplier);
+            }
          }
       }
 
@@ -201,15 +217,35 @@ public final class NationEvents {
       NationStore store = NationStore.get();
 
       for (NationStore.Nation nation : store.nations()) {
+         if (nation.doctrine().randomTreasuryDrain && nation.balance > 0.0) {
+            double loss = Math.min(nation.balance, 10.0 + (double)RANDOM.nextInt(41));
+            nation.balance = NationStore.roundMoney(nation.balance - loss);
+            store.notifyNation(
+               server, nation, Component.literal("[NationWars] Carol II Lifestyle drained $" + NationStore.roundMoney(loss) + " from the treasury.")
+            );
+         }
+
          int claims = store.claimCount(nation);
          if (claims > 1) {
-            double due = NationStore.roundMoney((double)claims * 8.0 * nation.doctrine().maintenanceMultiplier);
+            double maintenanceMultiplier = nation.doctrine().maintenanceMultiplier;
+            if (nation.doctrine() == Doctrine.ROMANIAN && nation.lostCoreTerritory) {
+               maintenanceMultiplier *= 1.5;
+            }
+
+            double due = NationStore.roundMoney((double)claims * 8.0 * maintenanceMultiplier);
             if (nation.balance + 1.0E-4 >= due) {
                nation.balance = NationStore.roundMoney(nation.balance - due);
-            } else if (store.removeBorderClaim(nation)) {
-               store.notifyNation(server, nation, Component.literal("[NationWars] Maintenance failed. A border claim was lost."));
             } else {
-               store.notifyNation(server, nation, Component.literal("[NationWars] Maintenance failed, but no non-capital border claim could be removed."));
+               boolean lostClaim = store.removeBorderClaim(nation);
+               if (lostClaim && nation.doctrine() == Doctrine.FRENCH) {
+                  store.removeBorderClaim(nation);
+               }
+
+               if (lostClaim) {
+                  store.notifyNation(server, nation, Component.literal("[NationWars] Maintenance failed. A border claim was lost."));
+               } else {
+                  store.notifyNation(server, nation, Component.literal("[NationWars] Maintenance failed, but no non-capital border claim could be removed."));
+               }
             }
          }
       }
@@ -242,11 +278,17 @@ public final class NationEvents {
                   CAPTURE_PROGRESS.remove(progressKey);
                } else {
                   progress.seconds++;
-                  int required = attacker.get().doctrine().captureSeconds;
+                  int required = requiredCaptureSeconds(player, attacker.get(), defender.get(), war, claim);
                   player.displayClientMessage(Component.literal("Capturing " + defender.get().name + " " + progress.seconds + "/" + required + "s"), true);
                   if (progress.seconds >= required) {
+                     int capturingSide = store.sideOf(war, attacker.get());
                      store.transferClaim(claim.id(), attacker.get());
-                     war.attackerCapturedClaims.add(claim.id());
+                     if (capturingSide > 0) {
+                        war.attackerCapturedClaims.add(claim.id());
+                     } else {
+                        war.attackerCapturedClaims.remove(claim.id());
+                     }
+
                      store.save();
                      CAPTURE_PROGRESS.remove(progressKey);
                      store.notifyNation(
@@ -260,6 +302,63 @@ public final class NationEvents {
             clearCapture(player);
          }
       }
+   }
+
+   private static int requiredCaptureSeconds(ServerPlayer player, NationStore.Nation attacker, NationStore.Nation defender, NationStore.War war, ClaimKey claim) {
+      double required = (double)attacker.doctrine().captureSeconds * defender.doctrine().defenseCaptureMultiplier;
+      if (attacker.doctrine() == Doctrine.BRITISH && defender.doctrine().ideology == Ideology.FASCIST) {
+         required *= 0.75;
+      }
+
+      if (defender.doctrine() == Doctrine.BRITISH && isCoastalClaim(player.serverLevel(), claim)) {
+         required *= 0.75;
+      }
+
+      if (attacker.doctrine() == Doctrine.ITALIAN && war.attackerCapturedClaims.contains(claim.id())) {
+         required *= 1.5;
+      }
+
+      if (defender.doctrine() == Doctrine.SOVIET && claim.id().equals(defender.capitalClaim) && attackersPresent(player, attacker) < 2) {
+         required *= 2.0;
+      }
+
+      return Math.max(10, (int)Math.round(required));
+   }
+
+   private static boolean isCoastalClaim(ServerLevel level, ClaimKey claim) {
+      int startX = claim.x() << 4;
+      int startZ = claim.z() << 4;
+      MutableBlockPos position = new MutableBlockPos();
+
+      for (int x = startX; x < startX + 16; x += 4) {
+         for (int z = startZ; z < startZ + 16; z += 4) {
+            int surfaceY = level.getHeight(Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+
+            for (int y = surfaceY; y >= surfaceY - 6 && y > level.getMinBuildHeight(); y--) {
+               position.set(x, y, z);
+               if (level.getFluidState(position).is(FluidTags.WATER)) {
+                  return true;
+               }
+            }
+         }
+      }
+
+      return false;
+   }
+
+   private static int attackersPresent(ServerPlayer reference, NationStore.Nation attacker) {
+      int count = 0;
+      ChunkPos chunk = reference.chunkPosition();
+
+      for (ServerPlayer other : reference.getServer().getPlayerList().getPlayers()) {
+         if (other.level().dimension().equals(reference.level().dimension())
+            && other.chunkPosition().equals(chunk)
+            && NationStore.get().isMember(other.getUUID(), attacker)) {
+            count++;
+         }
+      }
+
+      return count;
    }
 
    private static boolean defenderPresent(ServerPlayer attacker, NationStore.Nation defender) {
@@ -280,6 +379,38 @@ public final class NationEvents {
    private static void clearCapture(ServerPlayer player) {
       String prefix = player.getUUID() + ":";
       CAPTURE_PROGRESS.keySet().removeIf(key -> key.startsWith(prefix));
+   }
+
+   private static void applyClaimedLandEffects(ServerPlayer player) {
+      NationStore store = NationStore.get();
+      Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
+      if (!nation.isEmpty() && nation.get().doctrine().claimedLandSpeed) {
+         ClaimKey claim = ClaimKey.of(player.serverLevel(), player.chunkPosition());
+         if (store.nationOwning(claim).map(owner -> owner.id.equals(nation.get().id)).orElse(false)) {
+            player.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SPEED, 40, 0, true, false));
+         }
+      }
+   }
+
+   private static void completeSpyMissions(MinecraftServer server, long tick) {
+      NationStore store = NationStore.get();
+
+      for (NationStore.SpyMission mission : store.dueSpyMissions(tick)) {
+         ServerPlayer spy = server.getPlayerList().getPlayer(UUID.fromString(mission.spyPlayer));
+         if (spy != null) {
+            NationStore.Nation target = store.nationById(mission.target).orElse(null);
+            if (target == null) {
+               store.removeSpyMission(mission);
+            } else {
+               spy.sendSystemMessage(Component.literal("[NationWars] Spy report on " + target.name + ":"));
+               spy.sendSystemMessage(Component.literal("Doctrine: " + target.doctrine().displayName + " (" + target.doctrine().ideology.displayName + ")"));
+               spy.sendSystemMessage(Component.literal("Treasury: $" + NationStore.roundMoney(target.balance)));
+               spy.sendSystemMessage(Component.literal("Members: " + target.members.size()));
+               spy.sendSystemMessage(Component.literal("Claims: " + store.claimCount(target)));
+               store.removeSpyMission(mission);
+            }
+         }
+      }
    }
 
    private static double rewardForBrokenBlock(ServerPlayer player, BlockState state) {

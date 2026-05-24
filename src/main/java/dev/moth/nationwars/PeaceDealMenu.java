@@ -25,6 +25,7 @@ public final class PeaceDealMenu extends AbstractContainerMenu {
    private static final int TOP_SLOTS = 54;
    private static final double MONEY_STEP = 100.0;
    private static final double CLAIM_SCORE = 100.0;
+   private static final double BASE_PEACE_OFFER_FEE = 10.0;
    private static final int[] DEMAND_SLOTS = new int[]{9, 10, 11, 12, 18, 19, 20, 21, 27, 28, 29, 30, 36, 37, 38, 39};
    private static final int[] OFFER_SLOTS = new int[]{14, 15, 16, 17, 23, 24, 25, 26, 32, 33, 34, 35, 41, 42, 43, 44};
    private final Inventory playerInventory;
@@ -202,6 +203,7 @@ public final class PeaceDealMenu extends AbstractContainerMenu {
                   this.primaryLabel(),
                   List.of(
                      Component.literal("Sends this deal to " + this.otherNation.name + "."),
+                     Component.literal("Offer fee: $" + NationStore.roundMoney(this.peaceOfferFee())),
                      Component.literal(isEmptyDeal(this.draft) ? "No terms means white peace." : summary(this.draft))
                   )
                )
@@ -296,16 +298,22 @@ public final class PeaceDealMenu extends AbstractContainerMenu {
          NationStore.PeaceDeal sent = copyDeal(this.draft);
          sent.proposer = this.ownNation.id;
          sent.receiver = this.otherNation.id;
-         store.setPeaceDeal(this.war, sent);
-         store.notifyNation(
-            player.getServer(),
-            this.otherNation,
-            Component.literal(
-               "[NationWars] " + this.ownNation.name + " sent a peace deal: " + summary(sent) + " Use /peace " + this.ownNation.id + " to review it."
-            )
-         );
-         store.notifyNation(player.getServer(), this.ownNation, Component.literal("[NationWars] Peace deal sent to " + this.otherNation.name + "."));
-         player.closeContainer();
+         double fee = this.peaceOfferFee();
+         if (this.ownNation.balance + 1.0E-4 < fee) {
+            player.sendSystemMessage(Component.literal("[NationWars] Nation treasury needs $" + NationStore.roundMoney(fee) + " to send this peace deal."));
+         } else {
+            this.ownNation.balance = NationStore.roundMoney(this.ownNation.balance - fee);
+            store.setPeaceDeal(this.war, sent);
+            store.notifyNation(
+               player.getServer(),
+               this.otherNation,
+               Component.literal(
+                  "[NationWars] " + this.ownNation.name + " sent a peace deal: " + summary(sent) + " Use /peace " + this.ownNation.id + " to review it."
+               )
+            );
+            store.notifyNation(player.getServer(), this.ownNation, Component.literal("[NationWars] Peace deal sent to " + this.otherNation.name + "."));
+            player.closeContainer();
+         }
       } else {
          player.sendSystemMessage(Component.literal("[NationWars] That war is no longer active."));
          player.closeContainer();
@@ -355,6 +363,10 @@ public final class PeaceDealMenu extends AbstractContainerMenu {
 
    private double offerScore() {
       return (double)this.draft.offeredClaims.size() * 100.0 + this.draft.offeredMoney;
+   }
+
+   private double peaceOfferFee() {
+      return NationStore.roundMoney(10.0 * this.ownNation.doctrine().peaceOfferCostMultiplier);
    }
 
    private int returnableCapturedClaims() {

@@ -156,6 +156,7 @@ public final class NationStore {
       nation.id = key;
       nation.name = name;
       nation.owner = owner.getUUID().toString();
+      nation.ownerName = owner.getGameProfile().getName();
       nation.doctrine = doctrine.id;
       nation.balance = 250.0;
       nation.freeClaimsRemaining = Math.max(0, doctrine.freeClaims - 1);
@@ -176,6 +177,10 @@ public final class NationStore {
 
    public Optional<NationStore.Nation> nationOf(UUID playerId) {
       return Optional.ofNullable(this.state.playerNation.get(playerId.toString())).map(this.state.nations::get);
+   }
+
+   public List<NationStore.Nation> nationsSorted() {
+      return this.state.nations.values().stream().sorted(Comparator.comparing(nation -> nation.name.toLowerCase(Locale.ROOT))).toList();
    }
 
    public Optional<NationStore.Nation> nationOwning(ClaimKey claim) {
@@ -200,6 +205,17 @@ public final class NationStore {
       this.state.playerNation.put(id, nation.id);
       this.ensurePlayer(playerId);
       this.save();
+   }
+
+   public boolean addCityClaim(NationStore.Nation nation, String claimId, double cost) {
+      if (nation.id.equals(this.state.claims.get(claimId)) && !nation.cityClaims.contains(claimId) && !(nation.balance + 1.0E-4 < cost)) {
+         nation.balance = roundMoney(nation.balance - cost);
+         nation.cityClaims.add(claimId);
+         this.save();
+         return true;
+      } else {
+         return false;
+      }
    }
 
    public double playerBalance(UUID playerId) {
@@ -286,6 +302,13 @@ public final class NationStore {
       }
 
       if (oldOwner != null && claimId.equals(oldOwner.capitalClaim)) {
+         if (oldOwner.doctrine() == Doctrine.ROMANIAN) {
+            oldOwner.lostCoreTerritory = true;
+            this.notifyNation(
+               this.server, oldOwner, Component.literal("[NationWars] The Iron Guard penalty is active: losing your core territory raised maintenance costs.")
+            );
+         }
+
          oldOwner.capitalClaim = this.claimsOf(oldOwner).stream().filter(id -> !id.equals(claimId)).findFirst().orElse("");
       }
 
@@ -338,13 +361,15 @@ public final class NationStore {
 
    public NationStore.War getOrCreateWar(NationStore.Nation attacker, NationStore.Nation defender) {
       String key = warKey(attacker, defender);
-      return this.state.wars.computeIfAbsent(key, ignored -> {
-         NationStore.War war = new NationStore.War();
-         war.id = key;
-         war.attacker = attacker.id;
-         war.defender = defender.id;
-         return war;
+      NationStore.War war = this.state.wars.computeIfAbsent(key, ignored -> {
+         NationStore.War created = new NationStore.War();
+         created.id = key;
+         created.attacker = attacker.id;
+         created.defender = defender.id;
+         return created;
       });
+      ensureWarSides(war);
+      return war;
    }
 
    public void endWar(NationStore.War war) {
@@ -433,11 +458,219 @@ public final class NationStore {
    }
 
    public Optional<NationStore.War> activeWarForCapture(NationStore.Nation attacker, NationStore.Nation defender) {
-      return this.warBetween(attacker, defender).filter(war -> war.active);
+      return this.state.wars.values().stream().filter(war -> war.active).filter(war -> this.areOpposingWarSides(war, attacker, defender)).findFirst();
    }
 
    public boolean isWarParticipant(NationStore.War war, NationStore.Nation nation) {
-      return war != null && nation != null && (nation.id.equals(war.attacker) || nation.id.equals(war.defender));
+      return war != null && nation != null && this.sideOf(war, nation) != 0;
+   }
+
+   public List<NationStore.War> activeWarsOf(NationStore.Nation nation) {
+      return this.state
+         .wars
+         .values()
+         .stream()
+         .filter(war -> war.active)
+         .filter(war -> this.isWarParticipant(war, nation))
+         .sorted(Comparator.comparing(war -> war.id))
+         .toList();
+   }
+
+   public Optional<NationStore.War> firstActiveWarOf(NationStore.Nation nation) {
+      return this.activeWarsOf(nation).stream().findFirst();
+   }
+
+   public int sideOf(NationStore.War war, NationStore.Nation nation) {
+      if (war != null && nation != null) {
+         ensureWarSides(war);
+         if (war.attackerSide.contains(nation.id)) {
+            return 1;
+         } else {
+            return war.defenderSide.contains(nation.id) ? -1 : 0;
+         }
+      } else {
+         return 0;
+      }
+   }
+
+   public boolean areOpposingWarSides(NationStore.War war, NationStore.Nation first, NationStore.Nation second) {
+      int firstSide = this.sideOf(war, first);
+      int secondSide = this.sideOf(war, second);
+      return firstSide != 0 && secondSide != 0 && firstSide != secondSide;
+   }
+
+   public boolean addWarJoinRequest(NationStore.War war, NationStore.Nation requester, NationStore.Nation sponsor) {
+      if (war != null && requester != null && sponsor != null && war.active && this.sideOf(war, requester) == 0 && this.sideOf(war, sponsor) != 0) {
+         war.joinRequests.put(requester.id, sponsor.id);
+         this.save();
+         return true;
+      } else {
+         return false;
+      }
+   }
+
+   public boolean acceptWarJoinRequest(NationStore.War war, NationStore.Nation requester, NationStore.Nation acceptor) {
+      if (war != null && requester != null && acceptor != null && war.active) {
+         String sponsorId = war.joinRequests.get(requester.id);
+         if (sponsorId != null && this.sideOf(war, acceptor) != 0 && this.sideOf(war, acceptor) == this.sideOf(war, this.nationById(sponsorId).orElse(null))) {
+            if (this.sideOf(war, acceptor) > 0) {
+               war.attackerSide.add(requester.id);
+            } else {
+               war.defenderSide.add(requester.id);
+            }
+
+            war.joinRequests.remove(requester.id);
+            this.save();
+            return true;
+         } else {
+            return false;
+         }
+      } else {
+         return false;
+      }
+   }
+
+   public boolean rejectWarJoinRequest(NationStore.War war, NationStore.Nation requester, NationStore.Nation rejector) {
+      if (war != null && requester != null && rejector != null && this.sideOf(war, rejector) != 0) {
+         String sponsorId = war.joinRequests.get(requester.id);
+         if (sponsorId != null && this.sideOf(war, rejector) == this.sideOf(war, this.nationById(sponsorId).orElse(null))) {
+            war.joinRequests.remove(requester.id);
+            this.save();
+            return true;
+         } else {
+            return false;
+         }
+      } else {
+         return false;
+      }
+   }
+
+   public boolean addWarDefenseCall(NationStore.War war, NationStore.Nation ally, NationStore.Nation caller) {
+      if (war != null && ally != null && caller != null && war.active && this.sideOf(war, ally) == 0 && this.sideOf(war, caller) != 0) {
+         war.joinRequests.putIfAbsent(ally.id, caller.id);
+         this.save();
+         return true;
+      } else {
+         return false;
+      }
+   }
+
+   public boolean acceptWarDefenseCall(NationStore.War war, NationStore.Nation ally, NationStore.Nation caller) {
+      return this.acceptWarJoinRequest(war, ally, caller);
+   }
+
+   public boolean rejectWarDefenseCall(NationStore.War war, NationStore.Nation ally, NationStore.Nation caller) {
+      if (war != null && ally != null && caller != null && war.active) {
+         String callerId = war.joinRequests.get(ally.id);
+         if (!caller.id.equals(callerId)) {
+            return false;
+         } else {
+            war.joinRequests.remove(ally.id);
+            this.save();
+            return true;
+         }
+      } else {
+         return false;
+      }
+   }
+
+   public boolean leaveWarSafely(NationStore.War war, NationStore.Nation nation) {
+      if (war == null || nation == null || !war.active || this.sideOf(war, nation) == 0) {
+         return false;
+      } else if (!nation.id.equals(war.attacker) && !nation.id.equals(war.defender)) {
+         war.attackerSide.remove(nation.id);
+         war.defenderSide.remove(nation.id);
+         war.joinRequests.remove(nation.id);
+         this.save();
+         return true;
+      } else {
+         this.endWar(war);
+         return true;
+      }
+   }
+
+   public Collection<NationStore.Alliance> alliances() {
+      return this.state.alliances.values();
+   }
+
+   public Optional<NationStore.Alliance> allianceByName(String name) {
+      return Optional.ofNullable(this.state.alliances.get(nationKey(name)));
+   }
+
+   public Optional<NationStore.Alliance> allianceOf(NationStore.Nation nation) {
+      return this.state.alliances.values().stream().filter(alliance -> alliance.members.contains(nation.id)).findFirst();
+   }
+
+   public boolean createAlliance(NationStore.Nation leader, String name) {
+      String id = nationKey(name);
+      if (id.length() >= 3 && !this.state.alliances.containsKey(id) && !this.allianceOf(leader).isPresent()) {
+         NationStore.Alliance alliance = new NationStore.Alliance();
+         alliance.id = id;
+         alliance.name = name;
+         alliance.leader = leader.id;
+         alliance.members.add(leader.id);
+         this.state.alliances.put(id, alliance);
+         this.save();
+         return true;
+      } else {
+         return false;
+      }
+   }
+
+   public boolean inviteToAlliance(NationStore.Alliance alliance, NationStore.Nation inviter, NationStore.Nation invited) {
+      if (alliance != null && invited != null && alliance.members.contains(inviter.id) && !this.allianceOf(invited).isPresent()) {
+         alliance.invites.add(invited.id);
+         this.save();
+         return true;
+      } else {
+         return false;
+      }
+   }
+
+   public boolean acceptAllianceInvite(NationStore.Alliance alliance, NationStore.Nation nation) {
+      if (alliance != null && nation != null && !this.allianceOf(nation).isPresent() && alliance.invites.remove(nation.id)) {
+         alliance.members.add(nation.id);
+         this.save();
+         return true;
+      } else {
+         return false;
+      }
+   }
+
+   public boolean kickFromAlliance(NationStore.Alliance alliance, NationStore.Nation actor, NationStore.Nation kicked) {
+      if (alliance != null && actor != null && kicked != null && alliance.leader.equals(actor.id) && !alliance.leader.equals(kicked.id)) {
+         boolean removed = alliance.members.remove(kicked.id);
+         alliance.invites.remove(kicked.id);
+         if (removed) {
+            this.save();
+         }
+
+         return removed;
+      } else {
+         return false;
+      }
+   }
+
+   public NationStore.SpyMission createSpyMission(ServerPlayer spy, NationStore.Nation spyNation, NationStore.Nation target, long completeTick) {
+      NationStore.SpyMission mission = new NationStore.SpyMission();
+      mission.id = this.state.nextSpyMissionId++;
+      mission.spyPlayer = spy.getUUID().toString();
+      mission.spyName = spy.getGameProfile().getName();
+      mission.spyNation = spyNation.id;
+      mission.target = target.id;
+      mission.completeTick = completeTick;
+      this.state.spyMissions.add(mission);
+      this.save();
+      return mission;
+   }
+
+   public List<NationStore.SpyMission> dueSpyMissions(long tick) {
+      return this.state.spyMissions.stream().filter(mission -> mission.completeTick <= tick).sorted(Comparator.comparingInt(mission -> mission.id)).toList();
+   }
+
+   public void removeSpyMission(NationStore.SpyMission mission) {
+      this.state.spyMissions.removeIf(existing -> existing.id == mission.id);
+      this.save();
    }
 
    public void notifyNation(MinecraftServer server, NationStore.Nation nation, Component message) {
@@ -491,7 +724,20 @@ public final class NationStore {
          this.state.marketListings = new ArrayList<>();
       }
 
+      if (this.state.alliances == null) {
+         this.state.alliances = new LinkedHashMap<>();
+      }
+
+      if (this.state.spyMissions == null) {
+         this.state.spyMissions = new ArrayList<>();
+      }
+
+      if (this.state.nextSpyMissionId <= 0) {
+         this.state.nextSpyMissionId = this.state.spyMissions.stream().map(mission -> mission.id).max(Integer::compareTo).orElse(0) + 1;
+      }
+
       for (NationStore.War war : this.state.wars.values()) {
+         ensureWarSides(war);
          if (war.attackerCapturedClaims == null) {
             war.attackerCapturedClaims = new LinkedHashSet<>();
          }
@@ -514,9 +760,53 @@ public final class NationStore {
             nation.members = new LinkedHashSet<>();
          }
 
+         if (nation.cityClaims == null) {
+            nation.cityClaims = new LinkedHashSet<>();
+         }
+
+         if (nation.ownerName == null || nation.ownerName.isBlank()) {
+            nation.ownerName = nation.owner != null && nation.owner.length() >= 8 ? nation.owner.substring(0, 8) : "unknown";
+         }
+
          if (nation.owner != null) {
             nation.members.add(nation.owner);
          }
+      }
+
+      for (NationStore.Alliance alliance : this.state.alliances.values()) {
+         if (alliance.members == null) {
+            alliance.members = new LinkedHashSet<>();
+         }
+
+         if (alliance.invites == null) {
+            alliance.invites = new LinkedHashSet<>();
+         }
+
+         if (alliance.leader != null && !alliance.leader.isBlank()) {
+            alliance.members.add(alliance.leader);
+         }
+      }
+   }
+
+   private static void ensureWarSides(NationStore.War war) {
+      if (war.attackerSide == null) {
+         war.attackerSide = new LinkedHashSet<>();
+      }
+
+      if (war.defenderSide == null) {
+         war.defenderSide = new LinkedHashSet<>();
+      }
+
+      if (war.joinRequests == null) {
+         war.joinRequests = new LinkedHashMap<>();
+      }
+
+      if (war.attacker != null && !war.attacker.isBlank()) {
+         war.attackerSide.add(war.attacker);
+      }
+
+      if (war.defender != null && !war.defender.isBlank()) {
+         war.defenderSide.add(war.defender);
       }
    }
 
@@ -547,6 +837,14 @@ public final class NationStore {
       deal.offeredMoney = roundMoney(Math.max(0.0, deal.offeredMoney));
    }
 
+   public static final class Alliance {
+      public String id = "";
+      public String name = "";
+      public String leader = "";
+      public Set<String> members = new LinkedHashSet<>();
+      public Set<String> invites = new LinkedHashSet<>();
+   }
+
    public static final class MarketListing {
       public int id = 0;
       public String seller = "";
@@ -559,11 +857,15 @@ public final class NationStore {
       public String id = "";
       public String name = "";
       public String owner = "";
+      public String ownerName = "";
       public String doctrine = Doctrine.AMERICAN.id;
       public double balance = 0.0;
       public int freeClaimsRemaining = 0;
       public String capitalClaim = "";
       public Set<String> members = new LinkedHashSet<>();
+      public Set<String> cityClaims = new LinkedHashSet<>();
+      public long lastSpecialWarLeaveTick = -1L;
+      public boolean lostCoreTerritory = false;
 
       public Doctrine doctrine() {
          return Doctrine.byId(this.doctrine).orElse(Doctrine.AMERICAN);
@@ -580,14 +882,26 @@ public final class NationStore {
       public boolean returnCapturedClaims = false;
    }
 
+   public static final class SpyMission {
+      public int id = 0;
+      public String spyPlayer = "";
+      public String spyName = "";
+      public String spyNation = "";
+      public String target = "";
+      public long completeTick = 0L;
+   }
+
    public static final class State {
       public Map<String, NationStore.Nation> nations = new LinkedHashMap<>();
       public Map<String, String> playerNation = new LinkedHashMap<>();
       public Map<String, Double> players = new LinkedHashMap<>();
       public Map<String, String> claims = new LinkedHashMap<>();
       public Map<String, NationStore.War> wars = new LinkedHashMap<>();
+      public Map<String, NationStore.Alliance> alliances = new LinkedHashMap<>();
+      public List<NationStore.SpyMission> spyMissions = new ArrayList<>();
       public List<NationStore.MarketListing> marketListings = new ArrayList<>();
       public int nextListingId = 1;
+      public int nextSpyMissionId = 1;
    }
 
    public static final class War {
@@ -600,5 +914,9 @@ public final class NationStore {
       public Set<String> attackerCapturedClaims = new LinkedHashSet<>();
       public Set<String> peaceOffers = new LinkedHashSet<>();
       public NationStore.PeaceDeal peaceDeal = null;
+      public Set<String> attackerSide = new LinkedHashSet<>();
+      public Set<String> defenderSide = new LinkedHashSet<>();
+      public Map<String, String> joinRequests = new LinkedHashMap<>();
+      public boolean pendingDefenderResponse = false;
    }
 }
