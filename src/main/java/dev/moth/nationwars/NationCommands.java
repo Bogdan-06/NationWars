@@ -416,21 +416,18 @@ public final class NationCommands {
       ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("Doctrines: " + Doctrine.choices()), false);
 
       for (Doctrine doctrine : Doctrine.values()) {
-         String line = doctrine.id
-            + ": "
-            + doctrine.displayName
-            + " | ideology: "
-            + doctrine.ideology.displayName
-            + " | free claims: "
+         String header = doctrine.id + " - " + doctrine.displayName + " (" + doctrine.ideology.displayName + ")";
+         String stats = "  free "
             + doctrine.freeClaims
             + " | claim x"
             + doctrine.claimCostMultiplier
-            + " | maintenance x"
+            + " | maint x"
             + doctrine.maintenanceMultiplier
-            + " | capture "
+            + " | cap "
             + doctrine.captureSeconds
             + "s";
-         ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal(line), false);
+         ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal(header), false);
+         ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal(stats), false);
       }
 
       return 1;
