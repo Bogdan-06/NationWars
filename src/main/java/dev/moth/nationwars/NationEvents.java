@@ -15,9 +15,12 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerBossEvent;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.world.BossEvent.BossBarColor;
+import net.minecraft.world.BossEvent.BossBarOverlay;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.item.ItemStack;
@@ -107,6 +110,7 @@ public final class NationEvents {
    private static long nextOpacSyncTick = -1L;
    private static int opacSyncRetries = 0;
    private static final Map<String, NationEvents.CaptureProgress> CAPTURE_PROGRESS = new HashMap<>();
+   private static final Map<String, ServerBossEvent> CAPTURE_BARS = new HashMap<>();
    private static final Map<String, Long> ACCESS_COOLDOWNS = new HashMap<>();
    private static final Map<String, Long> BUILD_REWARD_COOLDOWNS = new HashMap<>();
    private static final Map<UUID, Long> OPAC_FULL_PASSES = new HashMap<>();
@@ -128,6 +132,7 @@ public final class NationEvents {
    public static void serverStopping(ServerStoppingEvent event) {
       NationStore.get().save();
       clearOpacPasses(event.getServer());
+      clearCaptureBars();
       CAPTURE_PROGRESS.clear();
       ACCESS_COOLDOWNS.clear();
       BUILD_REWARD_COOLDOWNS.clear();
@@ -376,21 +381,24 @@ public final class NationEvents {
          Optional<NationStore.Nation> defender = store.nationOwning(claim);
          if (!defender.isEmpty() && !defender.get().id.equals(attacker.get().id)) {
             Optional<NationStore.War> maybeWar = store.activeWarForCapture(attacker.get(), defender.get());
-            if (!maybeWar.isEmpty()) {
+            if (maybeWar.isEmpty()) {
+               hideCaptureBars(player);
+            } else {
                String progressKey = player.getUUID() + ":" + claim.id();
+               hideCaptureBarsExcept(player, progressKey);
                NationEvents.CaptureProgress progress = CAPTURE_PROGRESS.computeIfAbsent(
                   progressKey, ignored -> new NationEvents.CaptureProgress(attacker.get().id, defender.get().id, claim.id())
                );
                if (!progress.attackerNation.equals(attacker.get().id) || !progress.defenderNation.equals(defender.get().id)) {
-                  CAPTURE_PROGRESS.remove(progressKey);
+                  removeCapture(progressKey);
                } else if (defenderPresent(player, defender.get())) {
                   int required = requiredCaptureSeconds(player, attacker.get(), defender.get(), maybeWar.get(), claim);
-                  player.displayClientMessage(Component.literal("Capture paused " + progress.seconds + "/" + required + "s"), true);
+                  updateCaptureBar(player, progressKey, "Capture paused: " + defender.get().name, progress.seconds, required, BossBarColor.YELLOW);
                } else {
                   NationStore.War war = maybeWar.get();
                   progress.seconds++;
                   int required = requiredCaptureSeconds(player, attacker.get(), defender.get(), war, claim);
-                  player.displayClientMessage(Component.literal("Capturing " + defender.get().name + " " + progress.seconds + "/" + required + "s"), true);
+                  updateCaptureBar(player, progressKey, "Capturing " + defender.get().name, progress.seconds, required, BossBarColor.GREEN);
                   if (progress.seconds >= required) {
                      int capturingSide = store.sideOf(war, attacker.get());
                      boolean capitalCaptured = claim.id().equals(defender.get().capitalClaim);
@@ -399,18 +407,18 @@ public final class NationEvents {
                      recordWarCapture(store, war, attacker.get(), claim.id(), capturingSide);
                      if (store.claimCount(defender.get()) <= 0) {
                         eliminateNation(player.getServer(), store, war, attacker.get(), defender.get());
-                        CAPTURE_PROGRESS.remove(progressKey);
+                        removeCapture(progressKey);
                         return;
                      }
 
                      if (capitalCaptured) {
                         applyCapitulation(player.getServer(), store, war, attacker.get(), defender.get(), defenderClaimsBefore, capturingSide, 1);
-                        CAPTURE_PROGRESS.remove(progressKey);
+                        removeCapture(progressKey);
                         return;
                      }
 
                      store.save();
-                     CAPTURE_PROGRESS.remove(progressKey);
+                     removeCapture(progressKey);
                      store.notifyNation(
                         player.getServer(), attacker.get(), Component.literal("Captured " + claim.shortName() + " from " + defender.get().name + ".")
                      );
@@ -418,6 +426,8 @@ public final class NationEvents {
                   }
                }
             }
+         } else {
+            hideCaptureBars(player);
          }
       }
    }
@@ -541,10 +551,13 @@ public final class NationEvents {
                || store.nationOwning(claim).map(owner -> !owner.id.equals(defender.id)).orElse(true)
                || store.activeWarForCapture(attacker, defender).isEmpty()) {
                iterator.remove();
+               removeCaptureBar(entry.getKey());
             } else if (!playerStillInClaim(server, playerId, claim)) {
+               hideCaptureBarFromPlayer(server, entry.getKey(), playerId);
                progress.seconds--;
                if (progress.seconds <= 0) {
                   iterator.remove();
+                  removeCaptureBar(entry.getKey());
                }
             }
          }
@@ -556,15 +569,85 @@ public final class NationEvents {
       return player != null && ClaimKey.of(player.serverLevel(), player.chunkPosition()).equals(claim);
    }
 
+   private static void updateCaptureBar(ServerPlayer player, String progressKey, String label, int seconds, int required, BossBarColor color) {
+      int shownSeconds = Math.max(0, Math.min(seconds, required));
+      ServerBossEvent bar = CAPTURE_BARS.computeIfAbsent(progressKey, ignored -> new ServerBossEvent(Component.literal(label), color, BossBarOverlay.PROGRESS));
+      bar.setName(Component.literal(label + " " + shownSeconds + "/" + required + "s"));
+      bar.setColor(color);
+      bar.setProgress(Math.max(0.0F, Math.min(1.0F, (float)shownSeconds / (float)required)));
+      bar.setVisible(true);
+      if (!bar.getPlayers().contains(player)) {
+         bar.addPlayer(player);
+      }
+   }
+
+   private static void removeCapture(String progressKey) {
+      CAPTURE_PROGRESS.remove(progressKey);
+      removeCaptureBar(progressKey);
+   }
+
+   private static void removeCaptureBar(String progressKey) {
+      ServerBossEvent bar = CAPTURE_BARS.remove(progressKey);
+      if (bar != null) {
+         bar.removeAllPlayers();
+      }
+   }
+
+   private static void hideCaptureBars(ServerPlayer player) {
+      for (ServerBossEvent bar : CAPTURE_BARS.values()) {
+         bar.removePlayer(player);
+      }
+   }
+
+   private static void hideCaptureBarsExcept(ServerPlayer player, String keepKey) {
+      for (Entry<String, ServerBossEvent> entry : CAPTURE_BARS.entrySet()) {
+         if (!entry.getKey().equals(keepKey)) {
+            entry.getValue().removePlayer(player);
+         }
+      }
+   }
+
+   private static void hideCaptureBarFromPlayer(MinecraftServer server, String progressKey, UUID playerId) {
+      ServerBossEvent bar = CAPTURE_BARS.get(progressKey);
+      ServerPlayer player = server.getPlayerList().getPlayer(playerId);
+      if (bar != null && player != null) {
+         bar.removePlayer(player);
+      }
+   }
+
+   private static void clearCaptureBars() {
+      for (ServerBossEvent bar : CAPTURE_BARS.values()) {
+         bar.removeAllPlayers();
+      }
+
+      CAPTURE_BARS.clear();
+   }
+
    private static void clearCapture(ServerPlayer player) {
       String prefix = player.getUUID() + ":";
-      CAPTURE_PROGRESS.keySet().removeIf(key -> key.startsWith(prefix));
+      Iterator<String> iterator = CAPTURE_PROGRESS.keySet().iterator();
+
+      while (iterator.hasNext()) {
+         String key = iterator.next();
+         if (key.startsWith(prefix)) {
+            iterator.remove();
+            removeCaptureBar(key);
+         }
+      }
    }
 
    private static void clearCaptureExcept(ServerPlayer player, String claimId) {
       String prefix = player.getUUID() + ":";
       String current = prefix + claimId;
-      CAPTURE_PROGRESS.keySet().removeIf(key -> key.startsWith(prefix) && !key.equals(current));
+      Iterator<String> iterator = CAPTURE_PROGRESS.keySet().iterator();
+
+      while (iterator.hasNext()) {
+         String key = iterator.next();
+         if (key.startsWith(prefix) && !key.equals(current)) {
+            iterator.remove();
+            removeCaptureBar(key);
+         }
+      }
    }
 
    private static void applyClaimedLandEffects(ServerPlayer player) {

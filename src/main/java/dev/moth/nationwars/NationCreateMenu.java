@@ -111,7 +111,7 @@ public final class NationCreateMenu extends AbstractContainerMenu {
       ItemStack stack = new ItemStack(this.iconFor(doctrine));
       stack.set(DataComponents.CUSTOM_NAME, Component.literal(doctrine.displayName));
       List<Component> lore = new ArrayList<>();
-      lore.add(Component.literal("Creates: " + this.nationName));
+      lore.add(Component.literal(this.nationName.isBlank() ? "Name: type after picking" : "Creates: " + this.nationName));
       lore.add(Component.literal("Ideology: " + doctrine.ideology.displayName));
       lore.add(Component.literal("Free claims: " + doctrine.freeClaims));
       lore.add(Component.literal("Income x" + doctrine.incomeMultiplier));
@@ -127,7 +127,9 @@ public final class NationCreateMenu extends AbstractContainerMenu {
    private void chooseDoctrine(ServerPlayer player, int slotIndex) {
       Doctrine doctrine = this.choices[slotIndex];
       if (doctrine != null) {
-         if (NationCommands.createNationWithDoctrine(player, this.nationName, doctrine)) {
+         if (this.nationName.isBlank()) {
+            NationCommands.requestNationName(player, doctrine);
+         } else if (NationCommands.createNationWithDoctrine(player, this.nationName, doctrine)) {
             player.closeContainer();
          } else {
             this.refreshChoices();
@@ -137,15 +139,7 @@ public final class NationCreateMenu extends AbstractContainerMenu {
    }
 
    private Item iconFor(Doctrine doctrine) {
-      return switch (doctrine) {
-         case AMERICAN -> Items.DIAMOND;
-         case SOVIET -> Items.REDSTONE_BLOCK;
-         case FRENCH -> Items.BLUE_BANNER;
-         case BRITISH -> Items.SHIELD;
-         case GERMAN -> Items.IRON_SWORD;
-         case ITALIAN -> Items.GREEN_BANNER;
-         case ROMANIAN -> Items.EMERALD;
-      };
+      return NationIcons.countryBlock(doctrine);
    }
 
    private static final class DisplaySlot extends Slot {

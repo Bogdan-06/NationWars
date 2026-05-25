@@ -13,7 +13,6 @@ import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.ItemLore;
 
 public final class DoctrineMenu extends AbstractContainerMenu {
@@ -139,15 +138,7 @@ public final class DoctrineMenu extends AbstractContainerMenu {
    }
 
    private static Item iconFor(Doctrine doctrine) {
-      return switch (doctrine) {
-         case GERMAN -> Items.IRON_SWORD;
-         case SOVIET -> Items.REDSTONE_BLOCK;
-         case AMERICAN -> Items.DIAMOND;
-         case FRENCH -> Items.BLUE_BANNER;
-         case BRITISH -> Items.SHIELD;
-         case ITALIAN -> Items.GREEN_BANNER;
-         case ROMANIAN -> Items.EMERALD;
-      };
+      return NationIcons.countryBlock(doctrine);
    }
 
    private static final class DisplaySlot extends Slot {

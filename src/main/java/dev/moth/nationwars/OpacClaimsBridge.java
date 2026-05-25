@@ -14,6 +14,8 @@ import net.neoforged.fml.loading.FMLPaths;
 import xaero.pac.common.claims.player.api.IPlayerChunkClaimAPI;
 import xaero.pac.common.server.api.OpenPACServerAPI;
 import xaero.pac.common.server.claims.api.IServerClaimsManagerAPI;
+import xaero.pac.common.server.player.config.api.v2.IPlayerConfigAPI;
+import xaero.pac.common.server.player.config.api.v2.PlayerConfigOptions;
 
 public final class OpacClaimsBridge {
    private static final Pattern MAX_PLAYER_CLAIMS = Pattern.compile("(?m)^(\\s*maxPlayerClaims\\s*=\\s*)\\d+\\s*$");
@@ -59,6 +61,7 @@ public final class OpacClaimsBridge {
          ownerOf(server, claim)
             .ifPresent(owner -> NationWars.LOGGER.warn("Skipping OPAC mirror for {} because it is already claimed by {}", claim.id(), owner));
       } else {
+         syncClaimDisplayName(server, nation);
          claims(server).claim(dimension(claim), opacOwner, 0, claim.x(), claim.z(), false);
       }
    }
@@ -76,12 +79,14 @@ public final class OpacClaimsBridge {
       IPlayerChunkClaimAPI existing = claims.get(dimension(claim), claim.x(), claim.z());
       if (existing != null && !existing.getPlayerId().equals(nationOwner(oldOwner))) {
          if (existing.getPlayerId().equals(nationOwner(newOwner))) {
+            syncClaimDisplayName(server, newOwner);
             return;
          }
 
          NationWars.LOGGER.warn("Skipping OPAC transfer for {} because it is already claimed by {}", claim.id(), existing.getPlayerId());
       } else {
          claims.unclaim(dimension(claim), claim.x(), claim.z());
+         syncClaimDisplayName(server, newOwner);
          claims.claim(dimension(claim), nationOwner(newOwner), 0, claim.x(), claim.z(), false);
       }
    }
@@ -92,8 +97,20 @@ public final class OpacClaimsBridge {
          if (nation != null) {
             ClaimKey claim = ClaimKey.parse(entry.getKey());
             removeLegacyMisplacedMirror(server, store, nation, claim);
+            syncClaimDisplayName(server, nation);
             mirrorClaim(server, nation, claim);
          }
+      }
+   }
+
+   public static void syncClaimDisplayName(MinecraftServer server, NationStore.Nation nation) {
+      try {
+         IPlayerConfigAPI config = OpenPACServerAPI.get(server).getPlayerConfigManager().getLoadedConfig(nationOwner(nation));
+         if (config != null) {
+            config.tryToSet(PlayerConfigOptions.CLAIMS_NAME, nation.name);
+         }
+      } catch (RuntimeException var3) {
+         NationWars.LOGGER.warn("Could not set Open Parties and Claims display name for {}.", nation.name, var3);
       }
    }
 

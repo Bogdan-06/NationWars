@@ -10,9 +10,13 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Map.Entry;
 import java.util.stream.Collectors;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -26,6 +30,10 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ChunkPos;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
+import net.neoforged.neoforge.event.ServerChatEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent.Post;
 
 public final class NationCommands {
    private static final double BASE_CLAIM_COST = 100.0;
@@ -37,6 +45,8 @@ public final class NationCommands {
    private static final int SPY_COOLDOWN_SECONDS = 1800;
    private static final int PEACE_REJECT_COOLDOWN_SECONDS = 300;
    private static final int ROMANIAN_WAR_LEAVE_COOLDOWN_SECONDS = 1800;
+   private static final int CREATE_NAME_TIMEOUT_SECONDS = 60;
+   private static final Map<UUID, NationCommands.PendingNationCreation> PENDING_NATION_NAMES = new HashMap<>();
 
    private NationCommands() {
    }
@@ -83,11 +93,11 @@ public final class NationCommands {
                                              .executes(NationCommands::syncOpac)
                                        ))
                                     .then(
-                                       Commands.literal("create")
+                                       ((LiteralArgumentBuilder)Commands.literal("create").executes(NationCommands::openNationCreateMenuUnnamed))
                                           .then(
                                              ((RequiredArgumentBuilder)Commands.argument("name", StringArgumentType.word())
                                                    .executes(NationCommands::openNationCreateMenu))
-                                                .then(Commands.argument("doctrine", StringArgumentType.word()).executes(NationCommands::createNationCommand))
+                                                .then(Commands.argument("doctrine", StringArgumentType.word()).executes(NationCommands::openNationCreateMenu))
                                           )
                                     ))
                                  .then(Commands.literal("join").then(Commands.argument("name", StringArgumentType.word()).executes(NationCommands::joinNation))))
@@ -125,7 +135,7 @@ public final class NationCommands {
                                                    "war"
                                                 )
                                                 .requires(source -> source.hasPermission(0)))
-                                             .executes(NationCommands::warOverview))
+                                             .executes(NationCommands::openWarMenu))
                                           .then(
                                              Commands.literal("justify")
                                                 .then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::justifyWar))
@@ -162,7 +172,7 @@ public final class NationCommands {
                         .then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::declineAllianceDefense))
                   ))
                .then(Commands.literal("leave").then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::leaveWar))))
-            .then(Commands.literal("status").executes(NationCommands::warStatus))
+            .then(Commands.literal("status").executes(NationCommands::openWarMenu))
       );
       dispatcher.register(
          (LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal("peace").requires(source -> source.hasPermission(0)))
@@ -175,10 +185,74 @@ public final class NationCommands {
       );
    }
 
+   @SubscribeEvent
+   public static void serverTick(Post event) {
+      if (!PENDING_NATION_NAMES.isEmpty() && (long)event.getServer().getTickCount() % 20L == 0L) {
+         long tick = (long)event.getServer().getTickCount();
+         Iterator<Entry<UUID, NationCommands.PendingNationCreation>> iterator = PENDING_NATION_NAMES.entrySet().iterator();
+
+         while (iterator.hasNext()) {
+            Entry<UUID, NationCommands.PendingNationCreation> entry = iterator.next();
+            if (tick > entry.getValue().expiresTick) {
+               ServerPlayer player = event.getServer().getPlayerList().getPlayer(entry.getKey());
+               if (player != null) {
+                  fail(player, "Nation creation timed out. Use /nation create to start again.");
+               }
+
+               iterator.remove();
+            }
+         }
+      }
+   }
+
+   @SubscribeEvent
+   public static void loggedOut(PlayerLoggedOutEvent event) {
+      PENDING_NATION_NAMES.remove(event.getEntity().getUUID());
+   }
+
+   @SubscribeEvent
+   public static void serverStopping(ServerStoppingEvent event) {
+      PENDING_NATION_NAMES.clear();
+   }
+
+   @SubscribeEvent
+   public static void chatNameInput(ServerChatEvent event) {
+      ServerPlayer player = event.getPlayer();
+      NationCommands.PendingNationCreation pending = PENDING_NATION_NAMES.get(player.getUUID());
+      if (pending != null) {
+         event.setCanceled(true);
+         long tick = (long)player.getServer().getTickCount();
+         if (tick > pending.expiresTick) {
+            PENDING_NATION_NAMES.remove(player.getUUID());
+            fail(player, "Nation creation timed out. Use /nation create to start again.");
+         } else {
+            String name = event.getRawText().trim();
+            if (name.equalsIgnoreCase("cancel")) {
+               PENDING_NATION_NAMES.remove(player.getUUID());
+               fail(player, "Nation creation cancelled.");
+            } else if (createNationWithDoctrine(player, name, pending.doctrine)) {
+               PENDING_NATION_NAMES.remove(player.getUUID());
+            } else {
+               fail(player, "Type another nation name, or type cancel.");
+            }
+         }
+      }
+   }
+
+   private static int openNationCreateMenuUnnamed(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+      NationStore store = NationStore.get();
+      return openNationCreateMenu(player, store, "");
+   }
+
    private static int openNationCreateMenu(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
       ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
       NationStore store = NationStore.get();
-      String name = StringArgumentType.getString(context, "name");
+      return openNationCreateMenu(player, store, StringArgumentType.getString(context, "name"));
+   }
+
+   private static int openNationCreateMenu(ServerPlayer player, NationStore store, String name) {
+      PENDING_NATION_NAMES.remove(player.getUUID());
       if (!canStartNationCreation(player, store, name)) {
          return 0;
       } else if (store.availableDoctrines().isEmpty()) {
@@ -186,27 +260,21 @@ public final class NationCommands {
          return 0;
       } else {
          player.openMenu(
-            new SimpleMenuProvider((containerId, inventory, viewer) -> new NationCreateMenu(containerId, inventory, name), Component.literal("Create " + name))
+            new SimpleMenuProvider(
+               (containerId, inventory, viewer) -> new NationCreateMenu(containerId, inventory, name),
+               Component.literal(name.isBlank() ? "Create Nation" : "Create " + name)
+            )
          );
          return 1;
       }
    }
 
-   private static int createNationCommand(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      String name = StringArgumentType.getString(context, "name");
-      Optional<Doctrine> doctrine = Doctrine.byId(StringArgumentType.getString(context, "doctrine"));
-      if (doctrine.isEmpty()) {
-         fail(player, "Unknown doctrine. Use /nation doctrines.");
-         return 0;
-      } else {
-         return createNationWithDoctrine(player, name, doctrine.get()) ? 1 : 0;
-      }
-   }
-
    static boolean createNationWithDoctrine(ServerPlayer player, String name, Doctrine doctrine) {
       NationStore store = NationStore.get();
-      if (!canStartNationCreation(player, store, name)) {
+      if (NationStore.nationKey(name).length() < 3) {
+         fail(player, "Nation names need at least 3 letters or numbers.");
+         return false;
+      } else if (!canStartNationCreation(player, store, name)) {
          return false;
       } else if (store.isDoctrineTaken(doctrine)) {
          fail(player, doctrine.displayName + " is already taken by another nation.");
@@ -221,6 +289,7 @@ public final class NationCommands {
             return false;
          } else {
             NationStore.Nation nation = store.createNation(player, name, doctrine, capital);
+            PENDING_NATION_NAMES.remove(player.getUUID());
             player.refreshTabListName();
             ok(player, "Created " + nation.name + " with " + doctrine.displayName + ". Capital: " + capital.shortName());
             return true;
@@ -228,18 +297,37 @@ public final class NationCommands {
       }
    }
 
+   static void requestNationName(ServerPlayer player, Doctrine doctrine) {
+      NationStore store = NationStore.get();
+      if (canStartNationCreation(player, store, "")) {
+         if (store.isDoctrineTaken(doctrine)) {
+            fail(player, doctrine.displayName + " is already taken by another nation.");
+         } else {
+            PENDING_NATION_NAMES.put(player.getUUID(), new NationCommands.PendingNationCreation(doctrine, (long)player.getServer().getTickCount() + 1200L));
+            player.closeContainer();
+            ok(player, "Selected " + doctrine.displayName + ". Type your nation name in chat, or type cancel. You have 60 seconds.");
+         }
+      }
+   }
+
    private static boolean canStartNationCreation(ServerPlayer player, NationStore store, String name) {
-      String key = NationStore.nationKey(name);
-      if (key.length() < 3) {
-         fail(player, "Nation names need at least 3 letters or numbers.");
-         return false;
-      } else if (store.hasNation(player.getUUID())) {
+      if (store.hasNation(player.getUUID())) {
          fail(player, "You are already in a nation.");
          return false;
-      } else if (store.nationByName(name).isPresent()) {
-         fail(player, "That nation already exists.");
-         return false;
       } else {
+         if (!name.isBlank()) {
+            String key = NationStore.nationKey(name);
+            if (key.length() < 3) {
+               fail(player, "Nation names need at least 3 letters or numbers.");
+               return false;
+            }
+
+            if (store.nationByName(name).isPresent()) {
+               fail(player, "That nation already exists.");
+               return false;
+            }
+         }
+
          return true;
       }
    }
@@ -257,6 +345,7 @@ public final class NationCommands {
             return 0;
          } else {
             store.addMember(player.getUUID(), nation.get());
+            PENDING_NATION_NAMES.remove(player.getUUID());
             player.refreshTabListName();
             ok(player, "Joined " + nation.get().name + ".");
             return 1;
@@ -516,6 +605,12 @@ public final class NationCommands {
       return 1;
    }
 
+   private static int openWarMenu(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+      player.openMenu(new SimpleMenuProvider((containerId, inventory, viewer) -> new WarMenu(containerId, inventory), Component.literal("Wars")));
+      return 1;
+   }
+
    private static int sellHand(CommandContext<CommandSourceStack> context, double requestedPrice) throws CommandSyntaxException {
       ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
       ItemStack stack = player.getMainHandItem();
@@ -562,34 +657,10 @@ public final class NationCommands {
       }
    }
 
-   private static int nations(CommandContext<CommandSourceStack> context) {
-      NationStore store = NationStore.get();
-      List<NationStore.Nation> nations = store.nationsSorted();
-      if (nations.isEmpty()) {
-         ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("No nations exist yet."), false);
-         return 1;
-      } else {
-         ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("Nations:"), false);
-
-         for (NationStore.Nation nation : nations) {
-            ((CommandSourceStack)context.getSource())
-               .sendSuccess(
-                  () -> Component.literal(
-                        "- "
-                           + nation.name
-                           + " | leader: "
-                           + nation.ownerName
-                           + " | claims: "
-                           + store.claimCount(nation)
-                           + " | members: "
-                           + nation.members.size()
-                     ),
-                  false
-               );
-         }
-
-         return 1;
-      }
+   private static int nations(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+      player.openMenu(new SimpleMenuProvider((containerId, inventory, viewer) -> new NationsMenu(containerId, inventory), Component.literal("Nations")));
+      return 1;
    }
 
    private static int spy(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
@@ -1431,5 +1502,8 @@ public final class NationCommands {
 
    private static void fail(ServerPlayer player, String message) {
       player.sendSystemMessage(Component.literal("[NationWars] " + message));
+   }
+
+   private static record PendingNationCreation(Doctrine doctrine, long expiresTick) {
    }
 }
