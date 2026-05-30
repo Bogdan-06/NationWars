@@ -228,9 +228,17 @@ public final class NationEvents {
    @SubscribeEvent(
       priority = EventPriority.HIGHEST
    )
-   public static void blockBreak(BreakEvent event) {
+   public static void blockBreakAccess(BreakEvent event) {
       if (event.getPlayer() instanceof ServerPlayer player) {
          grantWarAccessIfNeeded(player, (long)player.getServer().getTickCount());
+      }
+   }
+
+   @SubscribeEvent(
+      priority = EventPriority.LOWEST
+   )
+   public static void blockBreakReward(BreakEvent event) {
+      if (event.getPlayer() instanceof ServerPlayer player) {
          if (!event.isCanceled()) {
             double reward = rewardForBrokenBlock(player, event.getState());
             if (!(reward <= 0.0)) {
@@ -244,11 +252,19 @@ public final class NationEvents {
    @SubscribeEvent(
       priority = EventPriority.HIGHEST
    )
-   public static void blockPlace(EntityPlaceEvent event) {
+   public static void blockPlaceAccess(EntityPlaceEvent event) {
       if (event.getEntity() instanceof ServerPlayer player) {
-         if (!doesNotPayBuildReward(event.getPlacedBlock().getBlock())) {
-            long tick = (long)player.getServer().getTickCount();
-            grantWarAccessIfNeeded(player, tick);
+         grantWarAccessIfNeeded(player, (long)player.getServer().getTickCount());
+      }
+   }
+
+   @SubscribeEvent(
+      priority = EventPriority.LOWEST
+   )
+   public static void blockPlaceReward(EntityPlaceEvent event) {
+      if (event.getEntity() instanceof ServerPlayer player) {
+         long tick = (long)player.getServer().getTickCount();
+         if (!event.isCanceled() && !doesNotPayBuildReward(event.getPlacedBlock().getBlock())) {
             String key = player.getUUID() + ":build";
             if (BUILD_REWARD_COOLDOWNS.getOrDefault(key, 0L) <= tick) {
                BUILD_REWARD_COOLDOWNS.put(key, tick + 20L);
@@ -662,21 +678,31 @@ public final class NationEvents {
    }
 
    private static void completeSpyMissions(MinecraftServer server, long tick) {
-      NationStore store = NationStore.get();
+      if (tick % 20L == 0L) {
+         NationStore store = NationStore.get();
 
-      for (NationStore.SpyMission mission : store.dueSpyMissions(tick)) {
-         ServerPlayer spy = server.getPlayerList().getPlayer(UUID.fromString(mission.spyPlayer));
-         if (spy != null) {
-            NationStore.Nation target = store.nationById(mission.target).orElse(null);
-            if (target == null) {
+         for (NationStore.SpyMission mission : store.dueSpyMissions(tick)) {
+            UUID spyId;
+            try {
+               spyId = UUID.fromString(mission.spyPlayer);
+            } catch (IllegalArgumentException var9) {
                store.removeSpyMission(mission);
-            } else {
-               spy.sendSystemMessage(Component.literal("[NationWars] Spy report on " + target.name + ":"));
-               spy.sendSystemMessage(Component.literal("Doctrine: " + target.doctrine().displayName + " (" + target.doctrine().ideology.displayName + ")"));
-               spy.sendSystemMessage(Component.literal("Treasury: $" + NationStore.roundMoney(target.balance)));
-               spy.sendSystemMessage(Component.literal("Members: " + target.members.size()));
-               spy.sendSystemMessage(Component.literal("Claims: " + store.claimCount(target)));
-               store.removeSpyMission(mission);
+               continue;
+            }
+
+            ServerPlayer spy = server.getPlayerList().getPlayer(spyId);
+            if (spy != null) {
+               NationStore.Nation target = store.nationById(mission.target).orElse(null);
+               if (target == null) {
+                  store.removeSpyMission(mission);
+               } else {
+                  spy.sendSystemMessage(Component.literal("[NationWars] Spy report on " + target.name + ":"));
+                  spy.sendSystemMessage(Component.literal("Doctrine: " + target.doctrine().displayName + " (" + target.doctrine().ideology.displayName + ")"));
+                  spy.sendSystemMessage(Component.literal("Treasury: $" + NationStore.roundMoney(target.balance)));
+                  spy.sendSystemMessage(Component.literal("Members: " + target.members.size()));
+                  spy.sendSystemMessage(Component.literal("Claims: " + store.claimCount(target)));
+                  store.removeSpyMission(mission);
+               }
             }
          }
       }

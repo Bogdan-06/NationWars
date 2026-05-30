@@ -295,6 +295,7 @@ public final class NationStore {
          return false;
       } else {
          this.state.claims.remove(claim.id());
+         nation.cityClaims.remove(claim.id());
          OpacClaimsBridge.unmirrorClaim(this.server, nation, claim);
          this.save();
          return true;
@@ -304,6 +305,10 @@ public final class NationStore {
    public void transferClaim(String claimId, NationStore.Nation newOwner) {
       NationStore.Nation oldOwner = Optional.ofNullable(this.state.claims.get(claimId)).map(this.state.nations::get).orElse(null);
       this.state.claims.put(claimId, newOwner.id);
+      if (oldOwner != null) {
+         oldOwner.cityClaims.remove(claimId);
+      }
+
       if (oldOwner != null) {
          OpacClaimsBridge.replaceClaim(this.server, oldOwner, newOwner, ClaimKey.parse(claimId));
       } else {
@@ -476,6 +481,7 @@ public final class NationStore {
       } else {
          String removed = candidates.get(RANDOM.nextInt(candidates.size()));
          this.state.claims.remove(removed);
+         nation.cityClaims.remove(removed);
          OpacClaimsBridge.unmirrorClaim(this.server, nation, ClaimKey.parse(removed));
          this.save();
          return true;
@@ -920,6 +926,8 @@ public final class NationStore {
          this.state.peaceCooldowns = new LinkedHashMap<>();
       }
 
+      this.state.claims.entrySet().removeIf(entry -> !this.state.nations.containsKey(entry.getValue()) || !isValidClaimId(entry.getKey()));
+      this.state.playerNation.entrySet().removeIf(entry -> !this.state.nations.containsKey(entry.getValue()));
       if (this.state.nextSpyMissionId <= 0) {
          this.state.nextSpyMissionId = this.state.spyMissions.stream().map(mission -> mission.id).max(Integer::compareTo).orElse(0) + 1;
       }
@@ -964,6 +972,17 @@ public final class NationStore {
          if (nation.owner != null) {
             nation.members.add(nation.owner);
          }
+
+         nation.members.removeIf(memberx -> memberx == null || memberx.isBlank());
+
+         for (String member : nation.members) {
+            this.state.playerNation.putIfAbsent(member, nation.id);
+         }
+
+         nation.cityClaims.removeIf(claimId -> !nation.id.equals(this.state.claims.get(claimId)));
+         if (nation.capitalClaim == null || !nation.id.equals(this.state.claims.get(nation.capitalClaim))) {
+            nation.capitalClaim = this.claimsOf(nation).stream().findFirst().orElse("");
+         }
       }
 
       for (NationStore.Alliance alliance : this.state.alliances.values()) {
@@ -987,6 +1006,7 @@ public final class NationStore {
       }
 
       war.capturedClaimsByNation.replaceAll((id, claims) -> (Set<String>)(claims == null ? new LinkedHashSet<>() : claims));
+      war.capturedClaimsByNation.values().forEach(claims -> claims.removeIf(claimId -> !isValidClaimId(claimId)));
       war.capturedClaimsByNation.entrySet().removeIf(entry -> entry.getValue().isEmpty());
    }
 
@@ -1035,8 +1055,19 @@ public final class NationStore {
          deal.offeredClaims = new LinkedHashSet<>();
       }
 
+      deal.demandedClaims.removeIf(claimId -> !isValidClaimId(claimId));
+      deal.offeredClaims.removeIf(claimId -> !isValidClaimId(claimId));
       deal.demandedMoney = roundMoney(Math.max(0.0, deal.demandedMoney));
       deal.offeredMoney = roundMoney(Math.max(0.0, deal.offeredMoney));
+   }
+
+   private static boolean isValidClaimId(String claimId) {
+      try {
+         ClaimKey.parse(claimId);
+         return true;
+      } catch (RuntimeException var2) {
+         return false;
+      }
    }
 
    public static final class Alliance {

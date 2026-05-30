@@ -860,9 +860,23 @@ public final class NationCommands {
          return 0;
       } else {
          Optional<NationStore.War> existing = store.warBetween(attacker.get(), defender.get());
-         if (existing.isPresent() && existing.get().active) {
-            fail(player, "That war is already active.");
-            return 0;
+         if (existing.isPresent()) {
+            NationStore.War existingWar = existing.get();
+            if (existingWar.active) {
+               fail(player, "That war is already active.");
+               return 0;
+            } else if (existingWar.pendingDefenderResponse) {
+               fail(player, "That war declaration is already waiting for a response.");
+               return 0;
+            } else {
+               if (attacker.get().id.equals(existingWar.attacker)) {
+                  fail(player, "You are already justifying this war. Use /war declare " + defender.get().id + " when it is ready.");
+               } else {
+                  fail(player, defender.get().name + " is already justifying a war against you.");
+               }
+
+               return 0;
+            }
          } else {
             NationStore.War war = store.getOrCreateWar(attacker.get(), defender.get());
             war.attacker = attacker.get().id;
@@ -896,39 +910,49 @@ public final class NationCommands {
          Optional<NationStore.War> maybeWar = store.warBetween(attacker.get(), defender.get());
          if (!maybeWar.isEmpty() && maybeWar.get().attacker.equals(attacker.get().id)) {
             NationStore.War war = maybeWar.get();
-            MinecraftServer server = player.getServer();
-            if ((long)server.getTickCount() < war.justificationCompleteTick) {
-               long secondsLeft = Math.max(1L, (war.justificationCompleteTick - (long)server.getTickCount()) / 20L);
-               fail(player, "Justification is not ready. " + secondsLeft + " seconds left.");
+            if (war.active) {
+               fail(player, "That war is already active.");
                return 0;
-            } else if (canDefenderRejectWar(store, attacker.get(), defender.get())) {
-               war.pendingDefenderResponse = true;
-               war.active = false;
-               store.save();
-               store.notifyNation(
-                  server,
-                  defender.get(),
-                  Component.literal(
-                     "[NationWars] "
-                        + attacker.get().name
-                        + " declared war. Your bigger territory lets you reject it. Use /war accept "
-                        + attacker.get().id
-                        + " or /war reject "
-                        + attacker.get().id
-                        + "."
-                  )
-               );
-               store.notifyNation(server, attacker.get(), Component.literal("[NationWars] War declaration sent to " + defender.get().name + " for response."));
-               return 1;
+            } else if (war.pendingDefenderResponse) {
+               fail(player, "That war declaration is already waiting for a response.");
+               return 0;
             } else {
-               war.active = true;
-               war.pendingDefenderResponse = false;
-               war.defenderStartingClaims = store.claimCount(defender.get());
-               store.save();
-               createAllianceDefenseCalls(server, store, war, defender.get());
-               store.notifyNation(server, defender.get(), Component.literal(attacker.get().name + " declared war on you."));
-               store.notifyNation(server, attacker.get(), Component.literal("War declared on " + defender.get().name + "."));
-               return 1;
+               MinecraftServer server = player.getServer();
+               if ((long)server.getTickCount() < war.justificationCompleteTick) {
+                  long secondsLeft = Math.max(1L, (war.justificationCompleteTick - (long)server.getTickCount()) / 20L);
+                  fail(player, "Justification is not ready. " + secondsLeft + " seconds left.");
+                  return 0;
+               } else if (canDefenderRejectWar(store, attacker.get(), defender.get())) {
+                  war.pendingDefenderResponse = true;
+                  war.active = false;
+                  store.save();
+                  store.notifyNation(
+                     server,
+                     defender.get(),
+                     Component.literal(
+                        "[NationWars] "
+                           + attacker.get().name
+                           + " declared war. Your bigger territory lets you reject it. Use /war accept "
+                           + attacker.get().id
+                           + " or /war reject "
+                           + attacker.get().id
+                           + "."
+                     )
+                  );
+                  store.notifyNation(
+                     server, attacker.get(), Component.literal("[NationWars] War declaration sent to " + defender.get().name + " for response.")
+                  );
+                  return 1;
+               } else {
+                  war.active = true;
+                  war.pendingDefenderResponse = false;
+                  war.defenderStartingClaims = store.claimCount(defender.get());
+                  store.save();
+                  createAllianceDefenseCalls(server, store, war, defender.get());
+                  store.notifyNation(server, defender.get(), Component.literal(attacker.get().name + " declared war on you."));
+                  store.notifyNation(server, attacker.get(), Component.literal("War declared on " + defender.get().name + "."));
+                  return 1;
+               }
             }
          } else {
             fail(player, "You need to justify this war first.");

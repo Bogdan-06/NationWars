@@ -133,6 +133,16 @@ public final class MarketMenu extends AbstractContainerMenu {
          } else if (listing.seller.equals(buyer.getUUID().toString())) {
             buyer.sendSystemMessage(Component.literal("[NationWars] You cannot buy your own listing."));
          } else {
+            UUID sellerId;
+            try {
+               sellerId = UUID.fromString(listing.seller);
+            } catch (IllegalArgumentException var12) {
+               store.removeMarketListing(listing.id);
+               this.refreshAndSync();
+               buyer.sendSystemMessage(Component.literal("[NationWars] That listing had an invalid seller and has been removed."));
+               return;
+            }
+
             ItemStack purchased = store.listingStack(listing, buyer.registryAccess());
             if (purchased.isEmpty()) {
                store.removeMarketListing(listing.id);
@@ -147,8 +157,8 @@ public final class MarketMenu extends AbstractContainerMenu {
                   this.refreshAndSync();
                   buyer.sendSystemMessage(Component.literal("[NationWars] Someone bought that listing first."));
                } else {
-                  double sellerPayout = this.adjustedSellerPayout(listing.price, UUID.fromString(listing.seller));
-                  store.addPlayerMoney(UUID.fromString(listing.seller), sellerPayout);
+                  double sellerPayout = this.adjustedSellerPayout(listing.price, sellerId);
+                  store.addPlayerMoney(sellerId, sellerPayout);
                   buyer.getInventory().placeItemBackInInventory(purchased);
                   buyer.sendSystemMessage(
                      Component.literal(

@@ -93,12 +93,16 @@ public final class OpacClaimsBridge {
 
    public static void syncAll(MinecraftServer server, NationStore store) {
       for (Entry<String, String> entry : store.claimOwnerEntries()) {
-         NationStore.Nation nation = store.nationById(entry.getValue()).orElse(null);
-         if (nation != null) {
-            ClaimKey claim = ClaimKey.parse(entry.getKey());
-            removeLegacyMisplacedMirror(server, store, nation, claim);
-            syncClaimDisplayName(server, nation);
-            mirrorClaim(server, nation, claim);
+         try {
+            NationStore.Nation nation = store.nationById(entry.getValue()).orElse(null);
+            if (nation != null) {
+               ClaimKey claim = ClaimKey.parse(entry.getKey());
+               removeLegacyMisplacedMirror(server, store, nation, claim);
+               syncClaimDisplayName(server, nation);
+               mirrorClaim(server, nation, claim);
+            }
+         } catch (RuntimeException var6) {
+            NationWars.LOGGER.warn("Skipping OPAC sync for NationWars claim {}.", entry.getKey(), var6);
          }
       }
    }
