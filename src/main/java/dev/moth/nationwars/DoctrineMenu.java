@@ -65,11 +65,12 @@ public final class DoctrineMenu extends AbstractContainerMenu {
       int slot = 10;
 
       for (Doctrine doctrine : Doctrine.values()) {
-         this.doctrinesContainer.setItem(slot, this.displayStack(doctrine));
-         slot += 2;
-         if (slot == 18) {
-            slot = 19;
+         if (slot > 16) {
+            break;
          }
+
+         this.doctrinesContainer.setItem(slot, this.displayStack(doctrine));
+         slot++;
       }
    }
 
@@ -79,62 +80,18 @@ public final class DoctrineMenu extends AbstractContainerMenu {
       List<Component> lore = new ArrayList<>();
       lore.add(Component.literal("ID: " + doctrine.id));
       lore.add(Component.literal("Ideology: " + doctrine.ideology.displayName));
-      lore.add(Component.literal(NationStore.get().isDoctrineTaken(doctrine) ? "Status: taken" : "Status: available"));
       lore.add(Component.literal("Free claims: " + doctrine.freeClaims));
       lore.add(Component.literal("Claim cost x" + doctrine.claimCostMultiplier));
       lore.add(Component.literal("Maintenance x" + doctrine.maintenanceMultiplier));
       lore.add(Component.literal("Capture: " + doctrine.captureSeconds + "s"));
-      lore.add(Component.literal("Justification: " + doctrine.justificationSeconds / 60 + "m base"));
-      addTraits(lore, doctrine);
+      lore.add(Component.literal("Justification: 90s"));
+
+      for (String perk : doctrine.perkLore()) {
+         lore.add(Component.literal(perk));
+      }
+
       stack.set(DataComponents.LORE, new ItemLore(lore));
       return stack;
-   }
-
-   private static void addTraits(List<Component> lore, Doctrine doctrine) {
-      switch (doctrine) {
-         case GERMAN:
-            lore.add(Component.literal("+ Faster enemy capture"));
-            lore.add(Component.literal("+ Shorter war justification"));
-            lore.add(Component.literal("- Higher maintenance"));
-            lore.add(Component.literal("- Loses more land on surrender/capitulation"));
-            break;
-         case SOVIET:
-            lore.add(Component.literal("+ Cheaper claims and maintenance"));
-            lore.add(Component.literal("+ Capital harder to conquer"));
-            lore.add(Component.literal("- Capital has no passive income"));
-            lore.add(Component.literal("- Higher market buy prices"));
-            break;
-         case AMERICAN:
-            lore.add(Component.literal("+ Can buy city income claims"));
-            lore.add(Component.literal("+ Better market prices"));
-            lore.add(Component.literal("- Cannot justify wars"));
-            lore.add(Component.literal("- Distance raises claim cost"));
-            break;
-         case FRENCH:
-            lore.add(Component.literal("+ Lower surrender loss"));
-            lore.add(Component.literal("+ Land is harder to conquer"));
-            lore.add(Component.literal("- Ally defense decline costs treasury"));
-            lore.add(Component.literal("- Fails maintenance harder"));
-            break;
-         case BRITISH:
-            lore.add(Component.literal("+ Captures fascist land faster"));
-            lore.add(Component.literal("+ More starter claims"));
-            lore.add(Component.literal("- Coast claims fall faster"));
-            lore.add(Component.literal("- Peace offers cost more"));
-            break;
-         case ITALIAN:
-            lore.add(Component.literal("+ Speed on owned land"));
-            lore.add(Component.literal("+ Better build pay on owned land"));
-            lore.add(Component.literal("+ Hills and mountains are harder to conquer"));
-            lore.add(Component.literal("- Bigger nations can reject your wars"));
-            lore.add(Component.literal("- Recaptures take longer"));
-            break;
-         case ROMANIAN:
-            lore.add(Component.literal("+ Can leave wars on cooldown"));
-            lore.add(Component.literal("+ Enemies justify slower"));
-            lore.add(Component.literal("- Lost core raises maintenance"));
-            lore.add(Component.literal("- Treasury randomly drains"));
-      }
    }
 
    private static Item iconFor(Doctrine doctrine) {

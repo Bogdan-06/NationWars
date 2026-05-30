@@ -2,6 +2,7 @@ package dev.moth.nationwars;
 
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
@@ -330,18 +331,56 @@ public final class NationEvents {
       NationStore store = NationStore.get();
 
       for (NationStore.Nation nation : store.nations()) {
-         if (nation.doctrine().capitalProducesIncome && nation.capitalClaim != null && !nation.capitalClaim.isBlank()) {
-            nation.balance = NationStore.roundMoney(nation.balance + 12.0 * nation.doctrine().incomeMultiplier);
-         }
-
-         for (String cityClaim : nation.cityClaims) {
-            if (store.claimsOf(nation).contains(cityClaim)) {
-               nation.balance = NationStore.roundMoney(nation.balance + 6.0 * nation.doctrine().incomeMultiplier);
-            }
+         double income = passiveIncomePerMinute(store, nation);
+         if (income > 0.0) {
+            nation.balance = NationStore.roundMoney(nation.balance + income);
          }
       }
 
       store.save();
+   }
+
+   static double passiveIncomePerTenMinutes(NationStore store, NationStore.Nation nation) {
+      return NationStore.roundMoney(passiveIncomePerMinute(store, nation) * 10.0);
+   }
+
+   private static double passiveIncomePerMinute(NationStore store, NationStore.Nation nation) {
+      double income = 0.0;
+      if (nation.doctrine().capitalProducesIncome && nation.capitalClaim != null && !nation.capitalClaim.isBlank()) {
+         income += 12.0;
+      }
+
+      List<String> ownedClaims = store.claimsOf(nation);
+
+      for (String cityClaim : nation.cityClaims) {
+         if (ownedClaims.contains(cityClaim)) {
+            income += 6.0;
+         }
+      }
+
+      return NationStore.roundMoney(income * nation.doctrine().incomeMultiplier);
+   }
+
+   static double maintenanceDuePerInterval(NationStore store, NationStore.Nation nation) {
+      int claims = store.claimCount(nation);
+      if (claims <= 1) {
+         return 0.0;
+      } else {
+         double maintenanceMultiplier = maintenanceMultiplier(nation);
+         int capturedClaims = store.capturedClaimsHeldBy(nation);
+         double normalDue = (double)claims * 8.0 * maintenanceMultiplier;
+         double capturedPremium = (double)capturedClaims * 8.0 * maintenanceMultiplier * 1.0;
+         return NationStore.roundMoney(normalDue + capturedPremium);
+      }
+   }
+
+   private static double maintenanceMultiplier(NationStore.Nation nation) {
+      double maintenanceMultiplier = nation.doctrine().maintenanceMultiplier;
+      if (nation.doctrine() == Doctrine.ROMANIAN && nation.lostCoreTerritory) {
+         maintenanceMultiplier *= 1.5;
+      }
+
+      return maintenanceMultiplier;
    }
 
    private static void chargeMaintenance(MinecraftServer server) {
@@ -356,19 +395,11 @@ public final class NationEvents {
             );
          }
 
-         int claims = store.claimCount(nation);
-         if (claims > 1) {
-            double maintenanceMultiplier = nation.doctrine().maintenanceMultiplier;
-            if (nation.doctrine() == Doctrine.ROMANIAN && nation.lostCoreTerritory) {
-               maintenanceMultiplier *= 1.5;
-            }
-
-            int capturedClaims = store.capturedClaimsHeldBy(nation);
-            double normalDue = (double)claims * 8.0 * maintenanceMultiplier;
-            double capturedPremium = (double)capturedClaims * 8.0 * maintenanceMultiplier * 1.0;
-            double due = NationStore.roundMoney(normalDue + capturedPremium);
+         double due = maintenanceDuePerInterval(store, nation);
+         if (!(due <= 0.0)) {
             if (nation.balance + 1.0E-4 >= due) {
                nation.balance = NationStore.roundMoney(nation.balance - due);
+               store.notifyNation(server, nation, Component.literal("[NationWars] You paid $" + due + " for your claim maintenance."));
             } else {
                boolean lostClaim = store.removeBorderClaim(nation);
                if (lostClaim && nation.doctrine() == Doctrine.FRENCH) {
@@ -466,7 +497,7 @@ public final class NationEvents {
          required *= 1.5;
       }
 
-      if (defender.doctrine() == Doctrine.SOVIET && claim.id().equals(defender.capitalClaim) && attackersPresent(player, attacker) < 2) {
+      if (defender.doctrine() == Doctrine.SOVIET && attackersPresent(player, attacker) < 2) {
          required *= 2.0;
       }
 

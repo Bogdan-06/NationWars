@@ -1,170 +1,23 @@
 package dev.moth.nationwars;
 
 import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
 public enum Doctrine {
-   GERMAN(
-      "german",
-      "Germany",
-      Ideology.FASCIST,
-      1.05,
-      1.0,
-      1.35,
-      0.65,
-      1.0,
-      3,
-      300,
-      35,
-      1.0,
-      1.5,
-      1.0,
-      1.0,
-      1.0,
-      false,
-      false,
-      true,
-      false,
-      false,
-      false,
-      false,
-      false
-   ),
-   SOVIET(
-      "soviet",
-      "Soviet Union",
-      Ideology.COMMUNIST,
-      0.8,
-      1.0,
-      0.75,
-      1.0,
-      1.0,
-      5,
-      540,
-      65,
-      1.15,
-      1.0,
-      1.25,
-      1.0,
-      1.0,
-      false,
-      false,
-      false,
-      false,
-      false,
-      false,
-      false,
-      false
-   ),
+   GERMAN("german", "Germany", Ideology.FASCIST, 1.0, 1.0, 1.35, 4, 45, 1.0, 1.5, 1.0, 1.0, 1.0, false, false, true, false, false, false, false, false),
+   SOVIET("soviet", "Soviet Union", Ideology.COMMUNIST, 0.8, 1.0, 0.75, 4, 60, 1.0, 1.0, 1.25, 1.0, 1.0, false, false, false, false, false, false, false, false),
    AMERICAN(
-      "american",
-      "United States",
-      Ideology.DEMOCRATIC,
-      0.95,
-      1.05,
-      1.0,
-      1.2,
-      1.0,
-      4,
-      480,
-      55,
-      1.0,
-      1.0,
-      0.8,
-      1.15,
-      1.0,
-      true,
-      true,
-      true,
-      true,
-      false,
-      false,
-      false,
-      false
+      "american", "United States", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 4, 60, 1.0, 1.0, 0.8, 1.15, 1.0, true, true, true, true, false, false, false, false
    ),
-   FRENCH(
-      "french",
-      "France",
-      Ideology.DEMOCRATIC,
-      1.0,
-      1.0,
-      0.95,
-      1.1,
-      1.0,
-      4,
-      540,
-      65,
-      1.25,
-      0.6,
-      1.0,
-      1.0,
-      1.0,
-      false,
-      false,
-      true,
-      false,
-      false,
-      false,
-      false,
-      false
-   ),
+   FRENCH("french", "France", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 4, 60, 1.25, 0.6, 1.0, 1.0, 1.0, false, false, true, false, false, false, false, false),
    BRITISH(
-      "british",
-      "United Kingdom",
-      Ideology.DEMOCRATIC,
-      1.05,
-      1.05,
-      0.9,
-      1.15,
-      1.0,
-      6,
-      600,
-      65,
-      1.0,
-      1.0,
-      1.0,
-      1.0,
-      3.0,
-      false,
-      false,
-      true,
-      false,
-      false,
-      false,
-      false,
-      false
+      "british", "United Kingdom", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 6, 60, 1.0, 1.0, 1.0, 1.0, 3.0, false, false, true, false, false, false, false, false
    ),
-   ITALIAN(
-      "italian", "Italy", Ideology.FASCIST, 0.95, 1.0, 1.0, 0.9, 1.0, 4, 420, 60, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, true, true, false, false
-   ),
-   ROMANIAN(
-      "romanian",
-      "Romania",
-      Ideology.NON_ALIGNED,
-      0.95,
-      1.1,
-      1.1,
-      0.9,
-      1.75,
-      4,
-      420,
-      50,
-      1.0,
-      1.0,
-      1.0,
-      1.0,
-      1.0,
-      false,
-      false,
-      true,
-      false,
-      false,
-      false,
-      true,
-      true
-   );
+   ITALIAN("italian", "Italy", Ideology.FASCIST, 1.0, 1.0, 1.0, 4, 60, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, true, true, false, false),
+   ROMANIAN("romanian", "Romania", Ideology.NON_ALIGNED, 1.0, 1.0, 1.0, 4, 60, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, false, false, true, true);
 
    public final String id;
    public final String displayName;
@@ -172,10 +25,7 @@ public enum Doctrine {
    public final double claimCostMultiplier;
    public final double incomeMultiplier;
    public final double maintenanceMultiplier;
-   public final double justificationMultiplier;
-   public final double incomingJustificationMultiplier;
    public final int freeClaims;
-   public final int justificationSeconds;
    public final int captureSeconds;
    public final double defenseCaptureMultiplier;
    public final double surrenderLandMultiplier;
@@ -198,10 +48,7 @@ public enum Doctrine {
       double claimCostMultiplier,
       double incomeMultiplier,
       double maintenanceMultiplier,
-      double justificationMultiplier,
-      double incomingJustificationMultiplier,
       int freeClaims,
-      int justificationSeconds,
       int captureSeconds,
       double defenseCaptureMultiplier,
       double surrenderLandMultiplier,
@@ -223,10 +70,7 @@ public enum Doctrine {
       this.claimCostMultiplier = claimCostMultiplier;
       this.incomeMultiplier = incomeMultiplier;
       this.maintenanceMultiplier = maintenanceMultiplier;
-      this.justificationMultiplier = justificationMultiplier;
-      this.incomingJustificationMultiplier = incomingJustificationMultiplier;
       this.freeClaims = freeClaims;
-      this.justificationSeconds = justificationSeconds;
       this.captureSeconds = captureSeconds;
       this.defenseCaptureMultiplier = defenseCaptureMultiplier;
       this.surrenderLandMultiplier = surrenderLandMultiplier;
@@ -250,5 +94,45 @@ public enum Doctrine {
 
    public static String choices() {
       return Arrays.stream(values()).map(doctrine -> doctrine.id).collect(Collectors.joining(", "));
+   }
+
+   public List<String> perkLore() {
+      return switch (this) {
+         case GERMAN -> List.of("+ Blitzkrieg: enemy claims capture faster", "- War Reparations: higher maintenance", "- 1945: loses more land after surrender");
+         case SOVIET -> List.of(
+         "+ Mother Russia: cheaper claims and maintenance",
+         "+ Great Patriotic War: land takes longer",
+         "  to conquer (200%) unless 2 attackers are present",
+         "- Collectivity: capital has no passive income",
+         "- Yellow Curtains: higher market buy prices"
+      );
+         case AMERICAN -> List.of(
+         "+ Capitalism: can buy city income claims",
+         "+ Worldwide Economy: better market prices",
+         "- Pacifism: cannot declare wars",
+         "- Isolation: distance raises claim cost"
+      );
+         case FRENCH -> List.of(
+         "+ White Flag: lower surrender loss",
+         "+ The Maginot Line: land is harder to conquer",
+         "- Casus Foederis: declining allies costs money",
+         "- Decolonisation: fails maintenance harder"
+      );
+         case BRITISH -> List.of(
+         "+ Antifascism: captures fascist land faster",
+         "+ Colonies: more starter claims",
+         "- Sea Lion: coast claims fall faster",
+         "- Neville Chamberlain: peace offers cost more"
+      );
+         case ITALIAN -> List.of(
+         "+ Highways: speed and build pay on owned land",
+         "+ Alpes: hill and mountain claims are tougher",
+         "- Push-over: bigger nations can reject your wars",
+         "- Civil War: recaptures take longer"
+      );
+         case ROMANIAN -> List.of(
+         "+ King Michael's Coup: can leave war on cooldown", "- The Iron Guard: lost core raises maintenance", "- Carol II Lifestyle: treasury randomly drains"
+      );
+      };
    }
 }

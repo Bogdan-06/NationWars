@@ -41,6 +41,7 @@ public final class NationCommands {
    private static final double CASUS_FOEDERIS_COST = 300.0;
    private static final double MIN_LAND_PURCHASE_COST = 250.0;
    private static final double LAND_PURCHASE_MULTIPLIER = 2.0;
+   static final int WAR_JUSTIFICATION_SECONDS = 90;
    private static final int SPY_SECONDS = 120;
    private static final int SPY_COOLDOWN_SECONDS = 1800;
    private static final int PEACE_REJECT_COOLDOWN_SECONDS = 300;
@@ -384,6 +385,8 @@ public final class NationCommands {
       player.sendSystemMessage(Component.literal("Claims: " + store.claimCount(nation) + ", free claims left: " + nation.freeClaimsRemaining));
       player.sendSystemMessage(Component.literal("Cities: " + nation.cityClaims.size()));
       player.sendSystemMessage(Component.literal("Treasury: $" + NationStore.roundMoney(nation.balance)));
+      player.sendSystemMessage(Component.literal("Maintenance spending / 10min: $" + NationEvents.maintenanceDuePerInterval(store, nation)));
+      player.sendSystemMessage(Component.literal("Passive income / 10min: $" + NationEvents.passiveIncomePerTenMinutes(store, nation)));
       store.allianceOf(nation).ifPresent(alliance -> player.sendSystemMessage(Component.literal("Alliance: " + alliance.name)));
       player.sendSystemMessage(
          Component.literal(
@@ -576,6 +579,10 @@ public final class NationCommands {
             + "s";
          ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal(header), false);
          ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal(stats), false);
+
+         for (String perk : doctrine.perkLore()) {
+            ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("  " + perk), false);
+         }
       }
 
       return 1;
@@ -891,7 +898,7 @@ public final class NationCommands {
             war.attackerSide.add(attacker.get().id);
             war.defenderSide.add(defender.get().id);
             war.defenderStartingClaims = 0;
-            int seconds = justificationSeconds(attacker.get(), defender.get());
+            int seconds = 90;
             war.justificationCompleteTick = (long)player.getServer().getTickCount() + (long)seconds * 20L;
             store.save();
             store.notifyNation(player.getServer(), defender.get(), Component.literal(attacker.get().name + " is justifying a war against you."));
@@ -1471,17 +1478,6 @@ public final class NationCommands {
       }
 
       return NationStore.roundMoney(100.0 * expansion * distance * nation.doctrine().claimCostMultiplier);
-   }
-
-   private static int justificationSeconds(NationStore.Nation attacker, NationStore.Nation defender) {
-      Doctrine attacking = attacker.doctrine();
-      Doctrine defending = defender.doctrine();
-      double multiplier = attacking.justificationMultiplier * defending.incomingJustificationMultiplier;
-      if (attacking.ideology == defending.ideology) {
-         multiplier *= 1.5;
-      }
-
-      return Math.max(30, (int)Math.round((double)attacking.justificationSeconds * multiplier));
    }
 
    private static boolean canDefenderRejectWar(NationStore store, NationStore.Nation attacker, NationStore.Nation defender) {

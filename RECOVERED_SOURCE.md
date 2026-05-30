@@ -1,9 +1,9 @@
 # Recovered source notice
 
-- Release: Nation Wars 0.1.9
+- Release: Nation Wars 0.1.10
 - CurseForge project: `1551298`
-- CurseForge file ID: `8168453`
-- Original JAR SHA-256: `78E5B3C766E1D84920ACC8D995F25EED931BBF2B90E7B98A74A382FB911AA966`
+- CurseForge file ID: `8171660`
+- Original JAR SHA-256: `CB1606661241DB2F92507C4E5034EF1A054CDB07F2A8D8C157060C9302DEE926`
 - Decompiler: Vineflower 1.10.1
 
 The original source-control snapshot for this release was unavailable. This

@@ -86,23 +86,20 @@ public final class NationCreateMenu extends AbstractContainerMenu {
       List<Doctrine> available = NationStore.get().availableDoctrines();
       if (available.isEmpty()) {
          ItemStack empty = new ItemStack(Items.BARRIER);
-         empty.set(DataComponents.CUSTOM_NAME, Component.literal("No doctrines available"));
+         empty.set(DataComponents.CUSTOM_NAME, Component.literal("No doctrines left"));
          empty.set(DataComponents.LORE, new ItemLore(List.of(Component.literal("Every doctrine has already been picked."))));
          this.choicesContainer.setItem(13, empty);
       } else {
          int slot = 10;
 
          for (Doctrine doctrine : available) {
-            if (slot >= 27) {
+            if (slot > 16) {
                break;
             }
 
             this.choices[slot] = doctrine;
             this.choicesContainer.setItem(slot, this.displayStack(doctrine));
-            slot += 2;
-            if (slot == 18) {
-               slot = 19;
-            }
+            slot++;
          }
       }
    }
@@ -117,8 +114,13 @@ public final class NationCreateMenu extends AbstractContainerMenu {
       lore.add(Component.literal("Income x" + doctrine.incomeMultiplier));
       lore.add(Component.literal("Claim cost x" + doctrine.claimCostMultiplier));
       lore.add(Component.literal("Maintenance x" + doctrine.maintenanceMultiplier));
-      lore.add(Component.literal("Justification: " + doctrine.justificationSeconds / 60 + "m"));
+      lore.add(Component.literal("Justification: 90s"));
       lore.add(Component.literal("Capture: " + doctrine.captureSeconds + "s"));
+
+      for (String perk : doctrine.perkLore()) {
+         lore.add(Component.literal(perk));
+      }
+
       lore.add(Component.literal("Click to create"));
       stack.set(DataComponents.LORE, new ItemLore(lore));
       return stack;

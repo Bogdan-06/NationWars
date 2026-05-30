@@ -12,7 +12,7 @@ public final class NationIcons {
          case GERMAN -> Items.NETHERITE_BLOCK;
          case SOVIET -> Items.REDSTONE_BLOCK;
          case AMERICAN -> Items.DIAMOND_BLOCK;
-         case FRENCH -> Items.IRON_BLOCK;
+         case FRENCH -> Items.QUARTZ_BLOCK;
          case BRITISH -> Items.LAPIS_BLOCK;
          case ITALIAN -> Items.EMERALD_BLOCK;
          case ROMANIAN -> Items.COPPER_BLOCK;
