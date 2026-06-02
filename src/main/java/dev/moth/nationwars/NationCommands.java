@@ -292,7 +292,7 @@ public final class NationCommands {
             NationStore.Nation nation = store.createNation(player, name, doctrine, capital);
             PENDING_NATION_NAMES.remove(player.getUUID());
             player.refreshTabListName();
-            ok(player, "Created " + nation.name + " with " + doctrine.displayName + ". Capital: " + capital.shortName());
+            ok(player, "Created " + nation.name + " with " + doctrine.displayName + ". Command ID: " + nation.id + ". Capital: " + capital.shortName());
             return true;
          }
       }
@@ -306,7 +306,12 @@ public final class NationCommands {
          } else {
             PENDING_NATION_NAMES.put(player.getUUID(), new NationCommands.PendingNationCreation(doctrine, (long)player.getServer().getTickCount() + 1200L));
             player.closeContainer();
-            ok(player, "Selected " + doctrine.displayName + ". Type your nation name in chat, or type cancel. You have 60 seconds.");
+            ok(
+               player,
+               "Selected "
+                  + doctrine.displayName
+                  + ". Type your nation name in chat, or type cancel. Spaces are display-only; commands use the generated ID. You have 60 seconds."
+            );
          }
       }
    }
@@ -380,6 +385,7 @@ public final class NationCommands {
       NationStore store = NationStore.get();
       Doctrine doctrine = nation.doctrine();
       player.sendSystemMessage(Component.literal("Nation: " + nation.name));
+      player.sendSystemMessage(Component.literal("Command ID: " + nation.id));
       player.sendSystemMessage(Component.literal("Leader: " + nation.ownerName));
       player.sendSystemMessage(Component.literal("Doctrine: " + doctrine.displayName + " (" + doctrine.id + ", " + doctrine.ideology.displayName + ")"));
       player.sendSystemMessage(Component.literal("Claims: " + store.claimCount(nation) + ", free claims left: " + nation.freeClaimsRemaining));
@@ -1359,6 +1365,11 @@ public final class NationCommands {
             if (ownSide == 0 || otherSide == 0 || ownSide == otherSide) {
                fail(player, "That nation is not on the enemy side of your war.");
                return 0;
+            } else if (!store.isPrimaryWarParticipant(war, own.get())) {
+               return surrenderJoinedNation(player, store, war, own.get(), other.get());
+            } else if (!store.isPrimaryWarParticipant(war, other.get())) {
+               fail(player, "Main war nations must surrender to the main enemy nation.");
+               return 0;
             } else if (ownSide < 0) {
                int capturedByOther = store.capturedClaimsBy(war, other.get()).size();
                if (capturedByOther <= 0) {
@@ -1436,6 +1447,33 @@ public final class NationCommands {
       } else {
          fail(player, "Both sides must be nations.");
          return 0;
+      }
+   }
+
+   private static int surrenderJoinedNation(ServerPlayer player, NationStore store, NationStore.War war, NationStore.Nation own, NationStore.Nation other) {
+      int returned = 0;
+
+      for (String claimId : new ArrayList<>(store.capturedClaimsBy(war, own))) {
+         store.transferClaim(claimId, other);
+         store.removeCapturedClaim(war, claimId);
+         returned++;
+      }
+
+      if (!store.removeWarParticipant(war, own)) {
+         fail(player, "Could not leave that war.");
+         return 0;
+      } else {
+         store.notifyNation(
+            player.getServer(),
+            own,
+            Component.literal("[NationWars] You surrendered to " + other.name + " and left the war. Returned captured claims: " + returned + ".")
+         );
+         store.notifyNation(
+            player.getServer(),
+            other,
+            Component.literal("[NationWars] " + own.name + " surrendered and left the war. Returned captured claims: " + returned + ".")
+         );
+         return 1;
       }
    }
 

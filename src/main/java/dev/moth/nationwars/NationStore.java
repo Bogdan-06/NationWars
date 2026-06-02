@@ -543,46 +543,53 @@ public final class NationStore {
             double offeredMoney = roundMoney(Math.max(0.0, deal.offeredMoney));
             if (receiver.balance + 1.0E-4 < demandedMoney || proposer.balance + 1.0E-4 < offeredMoney) {
                return false;
-            } else if (!this.claimsStillOwnedBy(deal.demandedClaims, receiver) || !this.claimsStillOwnedBy(deal.offeredClaims, proposer)) {
-               return false;
-            } else if (!this.containsCapital(deal.demandedClaims, receiver) && !this.containsCapital(deal.offeredClaims, proposer)) {
-               if (demandedMoney > 0.0) {
-                  receiver.balance = roundMoney(receiver.balance - demandedMoney);
-                  proposer.balance = roundMoney(proposer.balance + demandedMoney);
-               }
-
-               if (offeredMoney > 0.0) {
-                  proposer.balance = roundMoney(proposer.balance - offeredMoney);
-                  receiver.balance = roundMoney(receiver.balance + offeredMoney);
-               }
-
-               for (String claimId : deal.demandedClaims) {
-                  if (receiver.id.equals(this.state.claims.get(claimId))) {
-                     this.transferClaim(claimId, proposer);
+            } else if (this.claimsStillOwnedBy(deal.demandedClaims, receiver) && this.claimsStillOwnedBy(deal.offeredClaims, proposer)) {
+               if (!this.containsCapital(deal.demandedClaims, receiver) && !this.containsCapital(deal.offeredClaims, proposer)) {
+                  if (demandedMoney > 0.0) {
+                     receiver.balance = roundMoney(receiver.balance - demandedMoney);
+                     proposer.balance = roundMoney(proposer.balance + demandedMoney);
                   }
-               }
 
-               for (String claimIdx : deal.offeredClaims) {
-                  if (proposer.id.equals(this.state.claims.get(claimIdx))) {
-                     this.transferClaim(claimIdx, receiver);
+                  if (offeredMoney > 0.0) {
+                     proposer.balance = roundMoney(proposer.balance - offeredMoney);
+                     receiver.balance = roundMoney(receiver.balance + offeredMoney);
                   }
-               }
 
-               if (deal.returnCapturedClaims) {
-                  NationStore.Nation attacker = this.attacker(war).orElse(null);
-                  NationStore.Nation defender = this.defender(war).orElse(null);
-                  if (attacker != null && defender != null) {
-                     for (String claimIdxx : new ArrayList<>(war.attackerCapturedClaims)) {
-                        if (attacker.id.equals(this.state.claims.get(claimIdxx))) {
-                           this.transferClaim(claimIdxx, defender);
-                           this.removeCapturedClaim(war, claimIdxx);
-                        }
+                  for (String claimId : deal.demandedClaims) {
+                     if (receiver.id.equals(this.state.claims.get(claimId))) {
+                        this.transferClaim(claimId, proposer);
                      }
                   }
-               }
 
-               this.endWar(war);
-               return true;
+                  for (String claimIdx : deal.offeredClaims) {
+                     if (proposer.id.equals(this.state.claims.get(claimIdx))) {
+                        this.transferClaim(claimIdx, receiver);
+                     }
+                  }
+
+                  if (deal.returnCapturedClaims) {
+                     this.returnCapturedClaimsForDeal(war, proposer, receiver);
+                  }
+
+                  if (this.isPrimaryPeacePair(war, proposer, receiver)) {
+                     this.endWar(war);
+                  } else {
+                     war.peaceDeal = null;
+                     if (!this.isPrimaryWarParticipant(war, proposer)) {
+                        this.removeWarParticipant(war, proposer);
+                     }
+
+                     if (!this.isPrimaryWarParticipant(war, receiver)) {
+                        this.removeWarParticipant(war, receiver);
+                     }
+
+                     this.save();
+                  }
+
+                  return true;
+               } else {
+                  return false;
+               }
             } else {
                return false;
             }
@@ -633,6 +640,14 @@ public final class NationStore {
       return war != null && nation != null && this.sideOf(war, nation) != 0;
    }
 
+   public boolean isPrimaryWarParticipant(NationStore.War war, NationStore.Nation nation) {
+      return war != null && nation != null && (nation.id.equals(war.attacker) || nation.id.equals(war.defender));
+   }
+
+   public boolean isPrimaryPeacePair(NationStore.War war, NationStore.Nation first, NationStore.Nation second) {
+      return this.isPrimaryWarParticipant(war, first) && this.isPrimaryWarParticipant(war, second) && this.areOpposingWarSides(war, first, second);
+   }
+
    public List<NationStore.War> activeWarsOf(NationStore.Nation nation) {
       return this.state
          .wars
@@ -665,6 +680,100 @@ public final class NationStore {
       int firstSide = this.sideOf(war, first);
       int secondSide = this.sideOf(war, second);
       return firstSide != 0 && secondSide != 0 && firstSide != secondSide;
+   }
+
+   public boolean removeWarParticipant(NationStore.War war, NationStore.Nation nation) {
+      if (war != null && nation != null && war.active && this.sideOf(war, nation) != 0 && !this.isPrimaryWarParticipant(war, nation)) {
+         war.attackerSide.remove(nation.id);
+         war.defenderSide.remove(nation.id);
+         war.joinRequests.entrySet().removeIf(entry -> nation.id.equals(entry.getKey()) || nation.id.equals(entry.getValue()));
+         this.clearCapturedTrackingFor(war, nation);
+         this.save();
+         return true;
+      } else {
+         return false;
+      }
+   }
+
+   public int returnableCapturedClaimsForDeal(NationStore.War war, NationStore.Nation first, NationStore.Nation second) {
+      if (war != null && first != null && second != null && war.active && this.areOpposingWarSides(war, first, second)) {
+         ensureWarCaptureMap(war);
+         if (!this.isPrimaryPeacePair(war, first, second)) {
+            return this.capturedClaimsBy(war, first).size() + this.capturedClaimsBy(war, second).size();
+         } else {
+            int count = 0;
+
+            for (Entry<String, Set<String>> entry : war.capturedClaimsByNation.entrySet()) {
+               NationStore.Nation captor = this.nationById(entry.getKey()).orElse(null);
+               if (captor != null && this.sideOf(war, captor) != 0) {
+                  for (String claimId : entry.getValue()) {
+                     if (captor.id.equals(this.state.claims.get(claimId))) {
+                        count++;
+                     }
+                  }
+               }
+            }
+
+            return count;
+         }
+      } else {
+         return 0;
+      }
+   }
+
+   private void returnCapturedClaimsForDeal(NationStore.War war, NationStore.Nation proposer, NationStore.Nation receiver) {
+      if (war != null && proposer != null && receiver != null && this.areOpposingWarSides(war, proposer, receiver)) {
+         if (this.isPrimaryPeacePair(war, proposer, receiver)) {
+            NationStore.Nation attacker = this.attacker(war).orElse(null);
+            NationStore.Nation defender = this.defender(war).orElse(null);
+            if (attacker != null && defender != null) {
+               this.returnCapturedClaimsFromSide(war, 1, defender);
+               this.returnCapturedClaimsFromSide(war, -1, attacker);
+            }
+         } else {
+            this.returnCapturedClaimsOwnedBy(war, proposer, receiver);
+            this.returnCapturedClaimsOwnedBy(war, receiver, proposer);
+         }
+      }
+   }
+
+   private void returnCapturedClaimsFromSide(NationStore.War war, int captorSide, NationStore.Nation recipient) {
+      if (recipient != null) {
+         ensureWarCaptureMap(war);
+
+         for (String captorId : new ArrayList<>(war.capturedClaimsByNation.keySet())) {
+            NationStore.Nation captor = this.nationById(captorId).orElse(null);
+            if (captor != null && this.sideOf(war, captor) == captorSide) {
+               this.returnCapturedClaimsOwnedBy(war, captor, recipient);
+            }
+         }
+      }
+   }
+
+   private void returnCapturedClaimsOwnedBy(NationStore.War war, NationStore.Nation captor, NationStore.Nation recipient) {
+      if (war != null && captor != null && recipient != null) {
+         for (String claimId : new ArrayList<>(this.capturedClaimsBy(war, captor))) {
+            if (captor.id.equals(this.state.claims.get(claimId))) {
+               this.transferClaim(claimId, recipient);
+            }
+
+            this.removeCapturedClaim(war, claimId);
+         }
+      }
+   }
+
+   private void clearCapturedTrackingFor(NationStore.War war, NationStore.Nation nation) {
+      ensureWarCaptureMap(war);
+      Set<String> removedClaims = war.capturedClaimsByNation.remove(nation.id);
+      if (removedClaims != null) {
+         war.attackerCapturedClaims.removeAll(removedClaims);
+      }
+
+      war.capturedClaimsByNation.values().forEach(claims -> claims.removeIf(claimId -> nation.id.equals(this.state.claims.get(claimId))));
+      war.capturedClaimsByNation.entrySet().removeIf(entry -> entry.getValue().isEmpty());
+      Set<String> stillTracked = new LinkedHashSet<>();
+      war.capturedClaimsByNation.values().forEach(stillTracked::addAll);
+      war.attackerCapturedClaims.removeIf(claimId -> !stillTracked.contains(claimId));
    }
 
    public boolean addWarJoinRequest(NationStore.War war, NationStore.Nation requester, NationStore.Nation sponsor) {
@@ -746,11 +855,7 @@ public final class NationStore {
       if (war == null || nation == null || !war.active || this.sideOf(war, nation) == 0) {
          return false;
       } else if (!nation.id.equals(war.attacker) && !nation.id.equals(war.defender)) {
-         war.attackerSide.remove(nation.id);
-         war.defenderSide.remove(nation.id);
-         war.joinRequests.remove(nation.id);
-         this.save();
-         return true;
+         return this.removeWarParticipant(war, nation);
       } else {
          this.endWar(war);
          return true;

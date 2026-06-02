@@ -109,6 +109,7 @@ public final class NationsMenu extends AbstractContainerMenu {
       ItemStack stack = new ItemStack(NationIcons.countryBlock(nation.doctrine()));
       stack.set(DataComponents.CUSTOM_NAME, Component.literal(nation.name));
       List<Component> lore = new ArrayList<>();
+      lore.add(Component.literal("Command ID: " + nation.id));
       lore.add(Component.literal("Leader: " + nation.ownerName));
       lore.add(Component.literal("Claims: " + store.claimCount(nation)));
       lore.add(Component.literal("Members: " + nation.members.size()));
@@ -139,6 +140,7 @@ public final class NationsMenu extends AbstractContainerMenu {
             player.sendSystemMessage(Component.literal("[NationWars] That nation no longer exists."));
          } else {
             player.sendSystemMessage(Component.literal("[NationWars] " + nation.name));
+            player.sendSystemMessage(Component.literal("Command ID: " + nation.id));
             player.sendSystemMessage(
                Component.literal(
                   "Leader: "

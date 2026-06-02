@@ -1,6 +1,6 @@
-# Nation Wars 0.1.10
+# Nation Wars 0.1.11
 
-This tag preserves Nation Wars 0.1.10 from its original CurseForge release.
+This tag preserves Nation Wars 0.1.11 from its original CurseForge release.
 
 The original pre-0.2.2 source repository was not retained. The Java files in
 this snapshot were reconstructed from the published JAR and are provided for

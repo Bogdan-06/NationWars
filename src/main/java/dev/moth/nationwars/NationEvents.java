@@ -11,6 +11,7 @@ import java.util.UUID;
 import java.util.Map.Entry;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.BlockPos.MutableBlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -20,11 +21,13 @@ import net.minecraft.server.level.ServerBossEvent;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.BossEvent.BossBarColor;
 import net.minecraft.world.BossEvent.BossBarOverlay;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.ChunkPos;
@@ -61,7 +64,7 @@ public final class NationEvents {
    private static final double BUILD_REWARD_CHANCE = 0.2;
    private static final double ITALIAN_OWNED_BUILD_REWARD_MULTIPLIER = 3.0;
    private static final double CAPTURED_CLAIM_MAINTENANCE_MULTIPLIER = 2.0;
-   private static final long WAR_ACCESS_PASS_TICKS = 80L;
+   private static final long ACTION_ACCESS_PASS_TICKS = 2L;
    private static final int OPAC_SYNC_RETRY_INTERVAL_TICKS = 200;
    private static final Random RANDOM = new Random();
    private static final Set<String> NO_BUILD_REWARD_BLOCKS = Set.of(
@@ -219,7 +222,6 @@ public final class NationEvents {
             player.refreshTabListName();
          }
 
-         grantWarAccessIfNeeded(player, (long)player.getServer().getTickCount());
          applyClaimedLandEffects(player);
          handleCaptureTick(player);
          return;
@@ -231,7 +233,7 @@ public final class NationEvents {
    )
    public static void blockBreakAccess(BreakEvent event) {
       if (event.getPlayer() instanceof ServerPlayer player) {
-         grantWarAccessIfNeeded(player, (long)player.getServer().getTickCount());
+         grantWarActionPassIfNeeded(player, event.getPos(), (long)player.getServer().getTickCount());
       }
    }
 
@@ -255,7 +257,7 @@ public final class NationEvents {
    )
    public static void blockPlaceAccess(EntityPlaceEvent event) {
       if (event.getEntity() instanceof ServerPlayer player) {
-         grantWarAccessIfNeeded(player, (long)player.getServer().getTickCount());
+         grantWarActionPassIfNeeded(player, event.getPos(), (long)player.getServer().getTickCount());
       }
    }
 
@@ -286,39 +288,46 @@ public final class NationEvents {
       if (event.getEntity() instanceof ServerPlayer player) {
          ServerLevel var11 = player.serverLevel();
          BlockPos pos = event.getPos();
-         BlockState state = var11.getBlockState(pos);
-         if (isPaidAccessBlock(state.getBlock())) {
-            NationStore store = NationStore.get();
-            ClaimKey claim = ClaimKey.of(var11, new ChunkPos(pos));
-            Optional<NationStore.Nation> owner = store.nationOwning(claim);
-            if (!owner.isEmpty() && !store.isMember(player.getUUID(), owner.get())) {
-               long tick = (long)player.getServer().getTickCount();
-               if (isActiveWarClaim(player, owner.get())) {
-                  grantTemporaryOpacPass(player, tick + 80L);
-               } else {
-                  String cooldownKey = player.getUUID() + ":" + pos.asLong();
-                  if (ACCESS_COOLDOWNS.getOrDefault(cooldownKey, 0L) <= tick) {
-                     if (!store.withdrawPlayerMoney(player.getUUID(), 25.0)) {
-                        event.setCanceled(true);
-                        player.sendSystemMessage(Component.literal("[NationWars] You need $25.0 to open this in " + owner.get().name + "."));
-                     } else {
-                        ACCESS_COOLDOWNS.put(cooldownKey, tick + 60L);
-                        grantTemporaryOpacPass(player, tick + 60L);
-                        player.displayClientMessage(Component.literal("-$25.0 access fee"), true);
-                        store.notifyNation(
-                           player.getServer(),
-                           owner.get(),
-                           Component.literal(
-                              player.getGameProfile().getName()
-                                 + " paid to open a protected block at "
-                                 + pos.getX()
-                                 + ", "
-                                 + pos.getY()
-                                 + ", "
-                                 + pos.getZ()
-                                 + "."
-                           )
-                        );
+         long tick = (long)player.getServer().getTickCount();
+         if (isFluidBucket(player.getItemInHand(event.getHand()))) {
+            if (shouldCancelFluidBucketUse(player, var11, pos, event.getFace(), tick)) {
+               event.setCancellationResult(InteractionResult.FAIL);
+               event.setCanceled(true);
+            }
+         } else {
+            BlockState state = var11.getBlockState(pos);
+            if (isPaidAccessBlock(state.getBlock())) {
+               NationStore store = NationStore.get();
+               ClaimKey claim = ClaimKey.of(var11, new ChunkPos(pos));
+               Optional<NationStore.Nation> owner = store.nationOwning(claim);
+               if (!owner.isEmpty() && !store.isMember(player.getUUID(), owner.get())) {
+                  if (isActiveWarClaim(player, owner.get())) {
+                     grantActionOpacPass(player, tick);
+                  } else {
+                     String cooldownKey = player.getUUID() + ":" + pos.asLong();
+                     if (ACCESS_COOLDOWNS.getOrDefault(cooldownKey, 0L) <= tick) {
+                        if (!store.withdrawPlayerMoney(player.getUUID(), 25.0)) {
+                           event.setCanceled(true);
+                           player.sendSystemMessage(Component.literal("[NationWars] You need $25.0 to open this in " + owner.get().name + "."));
+                        } else {
+                           ACCESS_COOLDOWNS.put(cooldownKey, tick + 60L);
+                           grantActionOpacPass(player, tick);
+                           player.displayClientMessage(Component.literal("-$25.0 access fee"), true);
+                           store.notifyNation(
+                              player.getServer(),
+                              owner.get(),
+                              Component.literal(
+                                 player.getGameProfile().getName()
+                                    + " paid to open a protected block at "
+                                    + pos.getX()
+                                    + ", "
+                                    + pos.getY()
+                                    + ", "
+                                    + pos.getZ()
+                                    + "."
+                              )
+                           );
+                        }
                      }
                   }
                }
@@ -497,7 +506,7 @@ public final class NationEvents {
          required *= 1.5;
       }
 
-      if (defender.doctrine() == Doctrine.SOVIET && attackersPresent(player, attacker) < 2) {
+      if (defender.doctrine() == Doctrine.SOVIET && attackersPresent(player, war, attacker) < 2) {
          required *= 2.0;
       }
 
@@ -542,19 +551,27 @@ public final class NationEvents {
       return maxY >= 95 || maxY - minY >= 18;
    }
 
-   private static int attackersPresent(ServerPlayer reference, NationStore.Nation attacker) {
-      int count = 0;
-      ChunkPos chunk = reference.chunkPosition();
+   private static int attackersPresent(ServerPlayer reference, NationStore.War war, NationStore.Nation attacker) {
+      NationStore store = NationStore.get();
+      int attackerSide = store.sideOf(war, attacker);
+      if (attackerSide == 0) {
+         return 0;
+      } else {
+         int count = 0;
+         ChunkPos chunk = reference.chunkPosition();
 
-      for (ServerPlayer other : reference.getServer().getPlayerList().getPlayers()) {
-         if (other.level().dimension().equals(reference.level().dimension())
-            && other.chunkPosition().equals(chunk)
-            && NationStore.get().isMember(other.getUUID(), attacker)) {
-            count++;
+         for (ServerPlayer other : reference.getServer().getPlayerList().getPlayers()) {
+            Optional<NationStore.Nation> otherNation = store.nationOf(other.getUUID());
+            if (other.level().dimension().equals(reference.level().dimension())
+               && other.chunkPosition().equals(chunk)
+               && otherNation.isPresent()
+               && store.sideOf(war, otherNation.get()) == attackerSide) {
+               count++;
+            }
          }
-      }
 
-      return count;
+         return count;
+      }
    }
 
    private static boolean defenderPresent(ServerPlayer attacker, NationStore.Nation defender) {
@@ -822,14 +839,50 @@ public final class NationEvents {
          || block instanceof ShulkerBoxBlock;
    }
 
-   private static void grantWarAccessIfNeeded(ServerPlayer player, long tick) {
+   private static boolean isFluidBucket(ItemStack stack) {
+      return stack.is(Items.LAVA_BUCKET)
+         || stack.is(Items.WATER_BUCKET)
+         || stack.is(Items.POWDER_SNOW_BUCKET)
+         || stack.is(Items.COD_BUCKET)
+         || stack.is(Items.SALMON_BUCKET)
+         || stack.is(Items.PUFFERFISH_BUCKET)
+         || stack.is(Items.TROPICAL_FISH_BUCKET)
+         || stack.is(Items.AXOLOTL_BUCKET)
+         || stack.is(Items.TADPOLE_BUCKET);
+   }
+
+   private static boolean shouldCancelFluidBucketUse(ServerPlayer player, ServerLevel level, BlockPos clickedPos, Direction face, long tick) {
+      if (isFluidBlockedAt(player, level, clickedPos, tick)) {
+         return true;
+      } else {
+         BlockPos targetPos = face == null ? clickedPos : clickedPos.relative(face);
+         return !targetPos.equals(clickedPos) && isFluidBlockedAt(player, level, targetPos, tick);
+      }
+   }
+
+   private static boolean isFluidBlockedAt(ServerPlayer player, ServerLevel level, BlockPos pos, long tick) {
+      NationStore store = NationStore.get();
+      ClaimKey claim = ClaimKey.of(level, new ChunkPos(pos));
+      Optional<NationStore.Nation> owner = store.nationOwning(claim);
+      if (owner.isEmpty() || store.isMember(player.getUUID(), owner.get())) {
+         return false;
+      } else if (isActiveWarClaim(player, owner.get())) {
+         grantActionOpacPass(player, tick);
+         return false;
+      } else {
+         player.sendSystemMessage(Component.literal("[NationWars] You cannot place fluids in " + owner.get().name + "'s claim."));
+         return true;
+      }
+   }
+
+   private static void grantWarActionPassIfNeeded(ServerPlayer player, BlockPos pos, long tick) {
       NationStore store = NationStore.get();
       Optional<NationStore.Nation> own = store.nationOf(player.getUUID());
       if (!own.isEmpty()) {
-         ClaimKey claim = ClaimKey.of(player.serverLevel(), player.chunkPosition());
+         ClaimKey claim = ClaimKey.of(player.serverLevel(), new ChunkPos(pos));
          Optional<NationStore.Nation> owner = store.nationOwning(claim);
          if (owner.isPresent() && !owner.get().id.equals(own.get().id) && store.activeWarForCapture(own.get(), owner.get()).isPresent()) {
-            grantTemporaryOpacPass(player, tick + 80L);
+            grantActionOpacPass(player, tick);
          }
       }
    }
@@ -840,6 +893,10 @@ public final class NationEvents {
          .filter(nation -> !nation.id.equals(owner.id))
          .flatMap(nation -> store.activeWarForCapture(nation, owner))
          .isPresent();
+   }
+
+   private static void grantActionOpacPass(ServerPlayer player, long tick) {
+      grantTemporaryOpacPass(player, tick + 2L);
    }
 
    private static void applyCapitulation(

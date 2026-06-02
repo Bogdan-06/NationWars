@@ -1,7 +1,6 @@
 package dev.moth.nationwars;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.core.component.DataComponents;
@@ -376,22 +375,7 @@ public final class PeaceDealMenu extends AbstractContainerMenu {
    }
 
    private int returnableCapturedClaims() {
-      NationStore store = NationStore.get();
-      NationStore.Nation attacker = store.attacker(this.war).orElse(null);
-      if (attacker != null && !this.war.attackerCapturedClaims.isEmpty()) {
-         Set<String> attackerClaims = new HashSet<>(store.claimsOf(attacker));
-         int count = 0;
-
-         for (String claimId : this.war.attackerCapturedClaims) {
-            if (attackerClaims.contains(claimId)) {
-               count++;
-            }
-         }
-
-         return count;
-      } else {
-         return 0;
-      }
+      return NationStore.get().returnableCapturedClaimsForDeal(this.war, this.ownNation, this.otherNation);
    }
 
    private void refreshAndSync() {
