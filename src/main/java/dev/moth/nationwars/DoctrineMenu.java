@@ -84,7 +84,6 @@ public final class DoctrineMenu extends AbstractContainerMenu {
       lore.add(Component.literal("Claim cost x" + doctrine.claimCostMultiplier));
       lore.add(Component.literal("Maintenance x" + doctrine.maintenanceMultiplier));
       lore.add(Component.literal("Capture: " + doctrine.captureSeconds + "s"));
-      lore.add(Component.literal("Justification: 90s"));
 
       for (String perk : doctrine.perkLore()) {
          lore.add(Component.literal(perk));

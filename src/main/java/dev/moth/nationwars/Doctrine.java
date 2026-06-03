@@ -7,17 +7,15 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 public enum Doctrine {
-   GERMAN("german", "Germany", Ideology.FASCIST, 1.0, 1.0, 1.35, 4, 45, 1.0, 1.5, 1.0, 1.0, 1.0, false, false, true, false, false, false, false, false),
-   SOVIET("soviet", "Soviet Union", Ideology.COMMUNIST, 0.8, 1.0, 0.75, 4, 60, 1.0, 1.0, 1.25, 1.0, 1.0, false, false, false, false, false, false, false, false),
-   AMERICAN(
-      "american", "United States", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 4, 60, 1.0, 1.0, 0.8, 1.15, 1.0, true, true, true, true, false, false, false, false
-   ),
-   FRENCH("french", "France", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 4, 60, 1.25, 0.6, 1.0, 1.0, 1.0, false, false, true, false, false, false, false, false),
+   GERMAN("german", "Germany", Ideology.FASCIST, 1.0, 1.0, 1.35, 4, 35, 1.0, 1.6, 1.0, 1.0, 1.0, false, false, true, false, false, false, false, false),
+   SOVIET("soviet", "Soviet Union", Ideology.COMMUNIST, 0.8, 1.0, 0.75, 4, 50, 1.0, 1.0, 1.25, 1.0, 1.0, false, false, false, false, false, false, false, false),
+   AMERICAN("american", "United States", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 4, 50, 1.0, 1.0, 0.8, 1.0, 1.0, true, true, true, true, false, false, false, false),
+   FRENCH("french", "France", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 4, 50, 1.0, 0.6, 1.0, 1.0, 1.0, false, false, true, false, false, false, false, false),
    BRITISH(
-      "british", "United Kingdom", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 6, 60, 1.0, 1.0, 1.0, 1.0, 3.0, false, false, true, false, false, false, false, false
+      "british", "United Kingdom", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 6, 50, 1.0, 1.0, 1.0, 1.0, 3.0, false, false, true, false, false, false, false, false
    ),
-   ITALIAN("italian", "Italy", Ideology.FASCIST, 1.0, 1.0, 1.0, 4, 60, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, true, true, false, false),
-   ROMANIAN("romanian", "Romania", Ideology.NON_ALIGNED, 1.0, 1.0, 1.0, 4, 60, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, false, false, true, true);
+   ITALIAN("italian", "Italy", Ideology.FASCIST, 1.0, 1.0, 1.0, 4, 50, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, true, true, false, false),
+   ROMANIAN("romanian", "Romania", Ideology.NON_ALIGNED, 1.0, 1.0, 1.0, 4, 50, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, false, false, true, true);
 
    public final String id;
    public final String displayName;
@@ -98,40 +96,49 @@ public enum Doctrine {
 
    public List<String> perkLore() {
       return switch (this) {
-         case GERMAN -> List.of("+ Blitzkrieg: enemy claims capture faster", "- War Reparations: higher maintenance", "- 1945: loses more land after surrender");
+         case GERMAN -> List.of(
+         "+ Blitzkrieg: capture time reduced by 15s",
+         "+ Gleiwitz Incident: justification takes 40s less",
+         "- War Reparations: higher maintenance",
+         "- 1945: loses 40% of land after surrender"
+      );
          case SOVIET -> List.of(
          "+ Mother Russia: cheaper claims and maintenance",
-         "+ Great Patriotic War: land takes longer",
-         "  to conquer (200%) unless 2 attackers are present",
+         "+ Great Patriotic War: land takes twice as long",
+         "  to conquer unless 2 attackers are present",
          "- Collectivity: capital has no passive income",
          "- Yellow Curtains: higher market buy prices"
       );
          case AMERICAN -> List.of(
-         "+ Capitalism: can buy city income claims",
-         "+ Worldwide Economy: better market prices",
+         "+ Capitalism: pay claim cost for passive income",
+         "+ Worldwide Economy: lower market prices",
          "- Pacifism: cannot declare wars",
          "- Isolation: distance raises claim cost"
       );
          case FRENCH -> List.of(
-         "+ White Flag: lower surrender loss",
-         "+ The Maginot Line: land is harder to conquer",
+         "+ White Flag: loses 15% of land after surrender",
+         "+ The Maginot Line: your land takes 25s longer",
          "- Casus Foederis: declining allies costs money",
-         "- Decolonisation: fails maintenance harder"
+         "- No War Support: attacking triples maintenance"
       );
          case BRITISH -> List.of(
-         "+ Antifascism: captures fascist land faster",
+         "+ Ports: coast and river claims produce income",
          "+ Colonies: more starter claims",
-         "- Sea Lion: coast claims fall faster",
+         "- Sea Lion: coast and river claims fall 10s faster",
          "- Neville Chamberlain: peace offers cost more"
       );
          case ITALIAN -> List.of(
-         "+ Highways: speed and build pay on owned land",
-         "+ Alpes: hill and mountain claims are tougher",
-         "- Push-over: bigger nations can reject your wars",
-         "- Civil War: recaptures take longer"
+         "+ Developed Infrastructure: Speed II on core claims",
+         "  and random $5 building bonuses",
+         "+ Alpes: hill and mountain claims take 15s longer",
+         "- Push-over: bigger nations can reject once",
+         "- Civil War: recaptures take 10s longer"
       );
          case ROMANIAN -> List.of(
-         "+ King Michael's Coup: can leave war on cooldown", "- The Iron Guard: lost core raises maintenance", "- Carol II Lifestyle: treasury randomly drains"
+         "+ King Michael's Coup: leave war once per ideology",
+         "+ Flexible Foreign Policy: enemy justification +30s",
+         "- Iron Guard: lost core raises maintenance by 0.1x",
+         "- Carol II Lifestyle: treasury randomly drains"
       );
       };
    }

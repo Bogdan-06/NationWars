@@ -37,7 +37,6 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent.Post;
 
 public final class NationCommands {
    private static final double BASE_CLAIM_COST = 100.0;
-   private static final double CITY_COST = 500.0;
    private static final double CASUS_FOEDERIS_COST = 300.0;
    private static final double MIN_LAND_PURCHASE_COST = 250.0;
    private static final double LAND_PURCHASE_MULTIPLIER = 2.0;
@@ -505,12 +504,15 @@ public final class NationCommands {
          if (!nation.get().id.equals(store.nationOwning(claim).map(owned -> owned.id).orElse(""))) {
             fail(player, "Stand in one of your nation's claims.");
             return 0;
-         } else if (!store.addCityClaim(nation.get(), claim.id(), 500.0)) {
-            fail(player, "This claim is already a city or your treasury needs $" + NationStore.roundMoney(500.0) + ".");
-            return 0;
          } else {
-            ok(player, "City income enabled for " + claim.shortName() + ".");
-            return 1;
+            double cityCost = claimCost(store, nation.get(), claim);
+            if (!store.addCityClaim(nation.get(), claim.id(), cityCost)) {
+               fail(player, "This claim is already a city or your treasury needs $" + NationStore.roundMoney(cityCost) + ".");
+               return 0;
+            } else {
+               ok(player, "City income enabled for " + claim.shortName() + " for $" + NationStore.roundMoney(cityCost) + ".");
+               return 1;
+            }
          }
       }
    }
@@ -904,7 +906,7 @@ public final class NationCommands {
             war.attackerSide.add(attacker.get().id);
             war.defenderSide.add(defender.get().id);
             war.defenderStartingClaims = 0;
-            int seconds = 90;
+            int seconds = warJustificationSeconds(attacker.get(), defender.get());
             war.justificationCompleteTick = (long)player.getServer().getTickCount() + (long)seconds * 20L;
             store.save();
             store.notifyNation(player.getServer(), defender.get(), Component.literal(attacker.get().name + " is justifying a war against you."));
@@ -1012,6 +1014,10 @@ public final class NationCommands {
       if (!defender.isEmpty() && !attacker.isEmpty()) {
          Optional<NationStore.War> maybeWar = store.warBetween(attacker.get(), defender.get());
          if (!maybeWar.isEmpty() && maybeWar.get().pendingDefenderResponse && maybeWar.get().defender.equals(defender.get().id)) {
+            if (attacker.get().doctrine().canRejectWarDeclarations) {
+               store.recordWarDeclarationRejection(attacker.get(), defender.get());
+            }
+
             store.endWar(maybeWar.get());
             store.notifyNation(player.getServer(), attacker.get(), Component.literal("[NationWars] " + defender.get().name + " rejected the war declaration."));
             store.notifyNation(player.getServer(), defender.get(), Component.literal("[NationWars] War declaration rejected."));
@@ -1184,11 +1190,12 @@ public final class NationCommands {
          fail(player, "Only Romania can leave a war this way.");
          return 0;
       } else {
-         long tick = (long)player.getServer().getTickCount();
-         long cooldownTicks = 36000L;
-         if (own.get().lastSpecialWarLeaveTick > 0L && tick - own.get().lastSpecialWarLeaveTick < cooldownTicks) {
-            long secondsLeft = (cooldownTicks - (tick - own.get().lastSpecialWarLeaveTick)) / 20L;
-            fail(player, "King Michael's Coup is on cooldown for " + secondsLeft + " seconds.");
+         String ideologyKey = other.get().doctrine().ideology.name();
+         if (own.get().usedSpecialWarLeaveIdeologies.contains(ideologyKey)) {
+            fail(player, "King Michael's Coup was already used against a " + other.get().doctrine().ideology.displayName + " enemy.");
+            return 0;
+         } else if (own.get().usedSpecialWarLeaveIdeologies.size() >= Ideology.values().length) {
+            fail(player, "King Michael's Coup has already been used against every ideology.");
             return 0;
          } else {
             Optional<NationStore.War> maybeWar = store.activeWarForCapture(own.get(), other.get()).or(() -> store.activeWarForCapture(other.get(), own.get()));
@@ -1196,9 +1203,11 @@ public final class NationCommands {
                fail(player, "There is no active war with that nation.");
                return 0;
             } else {
-               own.get().lastSpecialWarLeaveTick = tick;
+               own.get().usedSpecialWarLeaveIdeologies.add(ideologyKey);
                store.leaveWarSafely(maybeWar.get(), own.get());
-               store.notifyNation(player.getServer(), own.get(), Component.literal("[NationWars] Left the war with no consequences."));
+               store.save();
+               String carolMessage = own.get().usedSpecialWarLeaveIdeologies.size() >= Ideology.values().length ? " Carol II Lifestyle is now removed." : "";
+               store.notifyNation(player.getServer(), own.get(), Component.literal("[NationWars] Left the war with no consequences." + carolMessage));
                store.notifyNation(
                   player.getServer(), other.get(), Component.literal("[NationWars] " + own.get().name + " left the war through King Michael's Coup.")
                );
@@ -1519,7 +1528,22 @@ public final class NationCommands {
    }
 
    private static boolean canDefenderRejectWar(NationStore store, NationStore.Nation attacker, NationStore.Nation defender) {
-      return attacker.doctrine().canRejectWarDeclarations && store.claimCount(defender) > store.claimCount(attacker);
+      return attacker.doctrine().canRejectWarDeclarations
+         && store.claimCount(defender) > store.claimCount(attacker)
+         && !store.hasRejectedWarDeclaration(attacker, defender);
+   }
+
+   static int warJustificationSeconds(NationStore.Nation attacker, NationStore.Nation defender) {
+      int seconds = 90;
+      if (attacker.doctrine() == Doctrine.GERMAN) {
+         seconds -= 40;
+      }
+
+      if (defender.doctrine() == Doctrine.ROMANIAN) {
+         seconds += 30;
+      }
+
+      return Math.max(10, seconds);
    }
 
    private static double appraise(ItemStack stack) {

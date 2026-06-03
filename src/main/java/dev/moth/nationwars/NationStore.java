@@ -91,6 +91,10 @@ public final class NationStore {
       return this.state.nations.values();
    }
 
+   public MinecraftServer server() {
+      return this.server;
+   }
+
    public Optional<NationStore.Nation> nationById(String id) {
       return Optional.ofNullable(this.state.nations.get(id));
    }
@@ -319,7 +323,7 @@ public final class NationStore {
          if (oldOwner.doctrine() == Doctrine.ROMANIAN) {
             oldOwner.lostCoreTerritory = true;
             this.notifyNation(
-               this.server, oldOwner, Component.literal("[NationWars] The Iron Guard penalty is active: losing your core territory raised maintenance costs.")
+               this.server, oldOwner, Component.literal("[NationWars] Iron Guard penalty is active: losing your core territory raised maintenance costs.")
             );
          }
 
@@ -404,6 +408,33 @@ public final class NationStore {
          }
 
          return count;
+      }
+   }
+
+   public boolean isCapturedClaimHeldBy(NationStore.Nation nation, String claimId) {
+      if (nation != null && claimId != null && !claimId.isBlank()) {
+         for (NationStore.War war : this.state.wars.values()) {
+            if (war.active) {
+               ensureWarCaptureMap(war);
+               Set<String> claims = war.capturedClaimsByNation.get(nation.id);
+               if (claims != null && claims.contains(claimId) && nation.id.equals(this.state.claims.get(claimId))) {
+                  return true;
+               }
+            }
+         }
+
+         return false;
+      } else {
+         return false;
+      }
+   }
+
+   public boolean isCapturedClaimTracked(NationStore.War war, String claimId) {
+      if (war != null && claimId != null && !claimId.isBlank()) {
+         ensureWarCaptureMap(war);
+         return war.capturedClaimsByNation.values().stream().anyMatch(claims -> claims.contains(claimId));
+      } else {
+         return false;
       }
    }
 
@@ -620,6 +651,17 @@ public final class NationStore {
    public void setPeaceCooldown(NationStore.Nation proposer, NationStore.Nation receiver, long tick) {
       if (proposer != null && receiver != null) {
          this.state.peaceCooldowns.put(peaceCooldownKey(proposer, receiver), tick);
+         this.save();
+      }
+   }
+
+   public boolean hasRejectedWarDeclaration(NationStore.Nation attacker, NationStore.Nation defender) {
+      return attacker != null && defender != null ? this.state.warDeclarationRejections.contains(warDeclarationRejectionKey(attacker, defender)) : false;
+   }
+
+   public void recordWarDeclarationRejection(NationStore.Nation attacker, NationStore.Nation defender) {
+      if (attacker != null && defender != null) {
+         this.state.warDeclarationRejections.add(warDeclarationRejectionKey(attacker, defender));
          this.save();
       }
    }
@@ -982,6 +1024,10 @@ public final class NationStore {
       return proposer.id + "->" + receiver.id;
    }
 
+   private static String warDeclarationRejectionKey(NationStore.Nation attacker, NationStore.Nation defender) {
+      return attacker.id + "->" + defender.id;
+   }
+
    public static double roundMoney(double value) {
       return (double)Math.round(value * 100.0) / 100.0;
    }
@@ -1031,6 +1077,10 @@ public final class NationStore {
          this.state.peaceCooldowns = new LinkedHashMap<>();
       }
 
+      if (this.state.warDeclarationRejections == null) {
+         this.state.warDeclarationRejections = new LinkedHashSet<>();
+      }
+
       this.state.claims.entrySet().removeIf(entry -> !this.state.nations.containsKey(entry.getValue()) || !isValidClaimId(entry.getKey()));
       this.state.playerNation.entrySet().removeIf(entry -> !this.state.nations.containsKey(entry.getValue()));
       if (this.state.nextSpyMissionId <= 0) {
@@ -1068,6 +1118,10 @@ public final class NationStore {
 
          if (nation.cityClaims == null) {
             nation.cityClaims = new LinkedHashSet<>();
+         }
+
+         if (nation.usedSpecialWarLeaveIdeologies == null) {
+            nation.usedSpecialWarLeaveIdeologies = new LinkedHashSet<>();
          }
 
          if (nation.ownerName == null || nation.ownerName.isBlank()) {
@@ -1203,6 +1257,7 @@ public final class NationStore {
       public Set<String> members = new LinkedHashSet<>();
       public Set<String> cityClaims = new LinkedHashSet<>();
       public long lastSpecialWarLeaveTick = -1L;
+      public Set<String> usedSpecialWarLeaveIdeologies = new LinkedHashSet<>();
       public boolean lostCoreTerritory = false;
 
       public Doctrine doctrine() {
@@ -1238,6 +1293,7 @@ public final class NationStore {
       public Map<String, NationStore.Alliance> alliances = new LinkedHashMap<>();
       public Map<String, Long> spyCooldowns = new LinkedHashMap<>();
       public Map<String, Long> peaceCooldowns = new LinkedHashMap<>();
+      public Set<String> warDeclarationRejections = new LinkedHashSet<>();
       public List<NationStore.SpyMission> spyMissions = new ArrayList<>();
       public List<NationStore.MarketListing> marketListings = new ArrayList<>();
       public int nextListingId = 1;

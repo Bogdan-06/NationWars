@@ -114,7 +114,6 @@ public final class NationCreateMenu extends AbstractContainerMenu {
       lore.add(Component.literal("Income x" + doctrine.incomeMultiplier));
       lore.add(Component.literal("Claim cost x" + doctrine.claimCostMultiplier));
       lore.add(Component.literal("Maintenance x" + doctrine.maintenanceMultiplier));
-      lore.add(Component.literal("Justification: 90s"));
       lore.add(Component.literal("Capture: " + doctrine.captureSeconds + "s"));
 
       for (String perk : doctrine.perkLore()) {
