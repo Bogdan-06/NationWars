@@ -15,5 +15,6 @@ public final class NationWars {
    public NationWars(IEventBus modBus, ModContainer container) {
       NeoForge.EVENT_BUS.register(NationCommands.class);
       NeoForge.EVENT_BUS.register(NationEvents.class);
+      NeoForge.EVENT_BUS.register(DoctrineDatapackReloadListener.class);
    }
 }
