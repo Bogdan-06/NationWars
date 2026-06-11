@@ -1,14 +1,18 @@
+/*
+ * Decompiled with CFR 0.152.
+ */
 package dev.moth.nationwars;
 
 public enum Ideology {
-   FASCIST("Fascist"),
-   COMMUNIST("Communist"),
-   DEMOCRATIC("Democratic"),
-   NON_ALIGNED("Non-aligned");
+    FASCIST("Fascist"),
+    COMMUNIST("Communist"),
+    DEMOCRATIC("Democratic"),
+    NON_ALIGNED("Non-aligned");
 
-   public final String displayName;
+    public final String displayName;
 
-   private Ideology(String displayName) {
-      this.displayName = displayName;
-   }
+    private Ideology(String displayName) {
+        this.displayName = displayName;
+    }
 }
+

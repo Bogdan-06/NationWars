@@ -1,6 +1,39 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  com.mojang.brigadier.CommandDispatcher
+ *  com.mojang.brigadier.arguments.ArgumentType
+ *  com.mojang.brigadier.arguments.DoubleArgumentType
+ *  com.mojang.brigadier.arguments.IntegerArgumentType
+ *  com.mojang.brigadier.arguments.StringArgumentType
+ *  com.mojang.brigadier.builder.LiteralArgumentBuilder
+ *  com.mojang.brigadier.builder.RequiredArgumentBuilder
+ *  com.mojang.brigadier.context.CommandContext
+ *  com.mojang.brigadier.exceptions.CommandSyntaxException
+ *  net.minecraft.commands.CommandSourceStack
+ *  net.minecraft.commands.Commands
+ *  net.minecraft.core.HolderLookup$Provider
+ *  net.minecraft.network.chat.Component
+ *  net.minecraft.server.MinecraftServer
+ *  net.minecraft.server.level.ServerLevel
+ *  net.minecraft.server.level.ServerPlayer
+ *  net.minecraft.world.MenuProvider
+ *  net.minecraft.world.SimpleMenuProvider
+ *  net.minecraft.world.item.ItemStack
+ *  net.minecraft.world.item.Items
+ *  net.minecraft.world.level.ChunkPos
+ *  net.neoforged.bus.api.SubscribeEvent
+ *  net.neoforged.neoforge.event.RegisterCommandsEvent
+ *  net.neoforged.neoforge.event.ServerChatEvent
+ *  net.neoforged.neoforge.event.entity.player.PlayerEvent$PlayerLoggedOutEvent
+ *  net.neoforged.neoforge.event.server.ServerStoppingEvent
+ *  net.neoforged.neoforge.event.tick.ServerTickEvent$Post
+ */
 package dev.moth.nationwars;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.ArgumentType;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -8,6 +41,18 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import dev.moth.nationwars.ClaimKey;
+import dev.moth.nationwars.Doctrine;
+import dev.moth.nationwars.DoctrineMenu;
+import dev.moth.nationwars.Ideology;
+import dev.moth.nationwars.MarketMenu;
+import dev.moth.nationwars.NationCreateMenu;
+import dev.moth.nationwars.NationEvents;
+import dev.moth.nationwars.NationStore;
+import dev.moth.nationwars.NationsMenu;
+import dev.moth.nationwars.OpacClaimsBridge;
+import dev.moth.nationwars.PeaceDealMenu;
+import dev.moth.nationwars.WarMenu;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -16,14 +61,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.Map.Entry;
 import java.util.stream.Collectors;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.MenuProvider;
 import net.minecraft.world.SimpleMenuProvider;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -31,1561 +77,1357 @@ import net.minecraft.world.level.ChunkPos;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.ServerChatEvent;
-import net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
-import net.neoforged.neoforge.event.tick.ServerTickEvent.Post;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 public final class NationCommands {
-   private static final double BASE_CLAIM_COST = 100.0;
-   private static final double CASUS_FOEDERIS_COST = 300.0;
-   private static final double MIN_LAND_PURCHASE_COST = 250.0;
-   private static final double LAND_PURCHASE_MULTIPLIER = 2.0;
-   static final int WAR_JUSTIFICATION_SECONDS = 90;
-   private static final int SPY_SECONDS = 120;
-   private static final int SPY_COOLDOWN_SECONDS = 1800;
-   private static final int PEACE_REJECT_COOLDOWN_SECONDS = 300;
-   private static final int ROMANIAN_WAR_LEAVE_COOLDOWN_SECONDS = 1800;
-   private static final int CREATE_NAME_TIMEOUT_SECONDS = 60;
-   private static final Map<UUID, NationCommands.PendingNationCreation> PENDING_NATION_NAMES = new HashMap<>();
+    private static final double BASE_CLAIM_COST = 100.0;
+    private static final double CASUS_FOEDERIS_COST = 300.0;
+    private static final double MIN_LAND_PURCHASE_COST = 250.0;
+    private static final double LAND_PURCHASE_MULTIPLIER = 2.0;
+    static final int WAR_JUSTIFICATION_SECONDS = 90;
+    private static final int SPY_SECONDS = 120;
+    private static final int SPY_COOLDOWN_SECONDS = 1800;
+    private static final int PEACE_REJECT_COOLDOWN_SECONDS = 300;
+    private static final int ROMANIAN_WAR_LEAVE_COOLDOWN_SECONDS = 1800;
+    private static final int CREATE_NAME_TIMEOUT_SECONDS = 60;
+    private static final Map<UUID, PendingNationCreation> PENDING_NATION_NAMES = new HashMap<UUID, PendingNationCreation>();
 
-   private NationCommands() {
-   }
+    private NationCommands() {
+    }
 
-   @SubscribeEvent
-   public static void register(RegisterCommandsEvent event) {
-      CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
-      dispatcher.register(
-         (LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal("money").requires(source -> source.hasPermission(0)))
-            .executes(NationCommands::money)
-      );
-      dispatcher.register(
-         (LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal("market")
-                     .requires(source -> source.hasPermission(0)))
-                  .executes(NationCommands::openMarket))
-               .then(
-                  ((LiteralArgumentBuilder)Commands.literal("sellhand").executes(context -> sellHand(context, -1.0)))
-                     .then(
-                        Commands.argument("price", DoubleArgumentType.doubleArg(0.01))
-                           .executes(context -> sellHand(context, DoubleArgumentType.getDouble(context, "price")))
-                     )
-               ))
-            .then(Commands.literal("cancel").then(Commands.argument("id", IntegerArgumentType.integer(1)).executes(NationCommands::cancelListing)))
-      );
-      dispatcher.register(
-         (LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal("nations").requires(source -> source.hasPermission(0)))
-            .executes(NationCommands::nations)
-      );
-      dispatcher.register(
-         (LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal("spy").requires(source -> source.hasPermission(0)))
-            .then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::spy))
-      );
-      dispatcher.register(
-         (LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal(
-                                                "nation"
-                                             )
-                                             .requires(source -> source.hasPermission(0)))
-                                          .then(
-                                             ((LiteralArgumentBuilder)Commands.literal("doctrines").executes(NationCommands::openDoctrinesMenu))
-                                                .then(Commands.literal("list").executes(NationCommands::doctrines))
-                                          ))
-                                       .then(
-                                          ((LiteralArgumentBuilder)Commands.literal("syncopac").requires(source -> source.hasPermission(2)))
-                                             .executes(NationCommands::syncOpac)
-                                       ))
-                                    .then(
-                                       ((LiteralArgumentBuilder)Commands.literal("create").executes(NationCommands::openNationCreateMenuUnnamed))
-                                          .then(
-                                             ((RequiredArgumentBuilder)Commands.argument("name", StringArgumentType.word())
-                                                   .executes(NationCommands::openNationCreateMenu))
-                                                .then(Commands.argument("doctrine", StringArgumentType.word()).executes(NationCommands::openNationCreateMenu))
-                                          )
-                                    ))
-                                 .then(Commands.literal("join").then(Commands.argument("name", StringArgumentType.word()).executes(NationCommands::joinNation))))
-                              .then(
-                                 ((LiteralArgumentBuilder)Commands.literal("info").executes(NationCommands::ownNationInfo))
-                                    .then(Commands.argument("name", StringArgumentType.word()).executes(NationCommands::nationInfo))
-                              ))
-                           .then(Commands.literal("claim").executes(NationCommands::claim)))
-                        .then(Commands.literal("buyclaim").executes(NationCommands::buyClaim)))
-                     .then(Commands.literal("unclaim").executes(NationCommands::unclaim)))
-                  .then(Commands.literal("city").executes(NationCommands::buyCity)))
-               .then(Commands.literal("balance").executes(NationCommands::nationBalance)))
-            .then(Commands.literal("deposit").then(Commands.argument("amount", DoubleArgumentType.doubleArg(0.01)).executes(NationCommands::deposit)))
-      );
-      dispatcher.register(
-         (LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal(
-                              "alliance"
-                           )
-                           .requires(source -> source.hasPermission(0)))
-                        .then(Commands.literal("create").then(Commands.argument("name", StringArgumentType.word()).executes(NationCommands::allianceCreate))))
-                     .then(Commands.literal("invite").then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::allianceInvite))))
-                  .then(Commands.literal("accept").then(Commands.argument("name", StringArgumentType.word()).executes(NationCommands::allianceAccept))))
-               .then(Commands.literal("kick").then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::allianceKick))))
-            .then(
-               ((LiteralArgumentBuilder)Commands.literal("info").executes(NationCommands::allianceInfo))
-                  .then(Commands.argument("name", StringArgumentType.word()).executes(NationCommands::allianceInfoNamed))
-            )
-      );
-      dispatcher.register(
-         (LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal("alliances").requires(source -> source.hasPermission(0)))
-            .executes(NationCommands::alliances)
-      );
-      dispatcher.register(
-         (LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal(
-                                                   "war"
-                                                )
-                                                .requires(source -> source.hasPermission(0)))
-                                             .executes(NationCommands::openWarMenu))
-                                          .then(
-                                             Commands.literal("justify")
-                                                .then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::justifyWar))
-                                          ))
-                                       .then(
-                                          Commands.literal("declare")
-                                             .then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::declareWar))
-                                       ))
-                                    .then(
-                                       Commands.literal("accept")
-                                          .then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::acceptWarDeclaration))
-                                    ))
-                                 .then(
-                                    Commands.literal("reject")
-                                       .then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::rejectWarDeclaration))
-                                 ))
-                              .then(
-                                 Commands.literal("join")
-                                    .then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::requestWarJoin))
-                              ))
-                           .then(
-                              Commands.literal("acceptjoin")
-                                 .then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::acceptWarJoin))
-                           ))
-                        .then(
-                           Commands.literal("rejectjoin").then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::rejectWarJoin))
-                        ))
-                     .then(
-                        Commands.literal("defend")
-                           .then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::acceptAllianceDefense))
-                     ))
-                  .then(
-                     Commands.literal("declinedefense")
-                        .then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::declineAllianceDefense))
-                  ))
-               .then(Commands.literal("leave").then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::leaveWar))))
-            .then(Commands.literal("status").executes(NationCommands::openWarMenu))
-      );
-      dispatcher.register(
-         (LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal("peace").requires(source -> source.hasPermission(0)))
-               .then(Commands.literal("reject").then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::rejectPeace))))
-            .then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::peace))
-      );
-      dispatcher.register(
-         (LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal("surrender").requires(source -> source.hasPermission(0)))
-            .then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::surrender))
-      );
-   }
+    @SubscribeEvent
+    public static void register(RegisterCommandsEvent event) {
+        CommandDispatcher dispatcher = event.getDispatcher();
+        dispatcher.register((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal((String)"money").requires(source -> source.hasPermission(0))).executes(NationCommands::money));
+        dispatcher.register((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal((String)"market").requires(source -> source.hasPermission(0))).executes(NationCommands::openMarket)).then(((LiteralArgumentBuilder)Commands.literal((String)"sellhand").executes(context -> NationCommands.sellHand((CommandContext<CommandSourceStack>)context, -1.0))).then(Commands.argument((String)"price", (ArgumentType)DoubleArgumentType.doubleArg((double)0.01)).executes(context -> NationCommands.sellHand((CommandContext<CommandSourceStack>)context, DoubleArgumentType.getDouble((CommandContext)context, (String)"price")))))).then(Commands.literal((String)"cancel").then(Commands.argument((String)"id", (ArgumentType)IntegerArgumentType.integer((int)1)).executes(NationCommands::cancelListing))));
+        dispatcher.register((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal((String)"nations").requires(source -> source.hasPermission(0))).executes(NationCommands::nations));
+        dispatcher.register((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal((String)"spy").requires(source -> source.hasPermission(0))).then(Commands.argument((String)"country", (ArgumentType)StringArgumentType.word()).executes(NationCommands::spy)));
+        dispatcher.register((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal((String)"nation").requires(source -> source.hasPermission(0))).then(((LiteralArgumentBuilder)Commands.literal((String)"doctrines").executes(NationCommands::openDoctrinesMenu)).then(Commands.literal((String)"list").executes(NationCommands::doctrines)))).then(((LiteralArgumentBuilder)Commands.literal((String)"syncopac").requires(source -> source.hasPermission(2))).executes(NationCommands::syncOpac))).then(((LiteralArgumentBuilder)Commands.literal((String)"create").executes(NationCommands::openNationCreateMenuUnnamed)).then(((RequiredArgumentBuilder)Commands.argument((String)"name", (ArgumentType)StringArgumentType.word()).executes(NationCommands::openNationCreateMenu)).then(Commands.argument((String)"doctrine", (ArgumentType)StringArgumentType.word()).executes(NationCommands::openNationCreateMenu))))).then(Commands.literal((String)"join").then(Commands.argument((String)"name", (ArgumentType)StringArgumentType.word()).executes(NationCommands::joinNation)))).then(((LiteralArgumentBuilder)Commands.literal((String)"info").executes(NationCommands::ownNationInfo)).then(Commands.argument((String)"name", (ArgumentType)StringArgumentType.word()).executes(NationCommands::nationInfo)))).then(Commands.literal((String)"claim").executes(NationCommands::claim))).then(((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal((String)"buyclaim").executes(NationCommands::buyClaim)).then(Commands.literal((String)"list").executes(NationCommands::buyClaimList))).then(Commands.literal((String)"accept").then(Commands.argument((String)"id", (ArgumentType)IntegerArgumentType.integer((int)1)).executes(NationCommands::buyClaimAccept)))).then(Commands.literal((String)"reject").then(Commands.argument((String)"id", (ArgumentType)IntegerArgumentType.integer((int)1)).executes(NationCommands::buyClaimReject))))).then(Commands.literal((String)"unclaim").executes(NationCommands::unclaim))).then(Commands.literal((String)"city").executes(NationCommands::buyCity))).then(Commands.literal((String)"balance").executes(NationCommands::nationBalance))).then(Commands.literal((String)"deposit").then(Commands.argument((String)"amount", (ArgumentType)DoubleArgumentType.doubleArg((double)0.01)).executes(NationCommands::deposit))));
+        dispatcher.register((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal((String)"alliance").requires(source -> source.hasPermission(0))).then(Commands.literal((String)"create").then(Commands.argument((String)"name", (ArgumentType)StringArgumentType.word()).executes(NationCommands::allianceCreate)))).then(Commands.literal((String)"invite").then(Commands.argument((String)"country", (ArgumentType)StringArgumentType.word()).executes(NationCommands::allianceInvite)))).then(Commands.literal((String)"accept").then(Commands.argument((String)"name", (ArgumentType)StringArgumentType.word()).executes(NationCommands::allianceAccept)))).then(Commands.literal((String)"kick").then(Commands.argument((String)"country", (ArgumentType)StringArgumentType.word()).executes(NationCommands::allianceKick)))).then(((LiteralArgumentBuilder)Commands.literal((String)"info").executes(NationCommands::allianceInfo)).then(Commands.argument((String)"name", (ArgumentType)StringArgumentType.word()).executes(NationCommands::allianceInfoNamed))));
+        dispatcher.register((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal((String)"alliances").requires(source -> source.hasPermission(0))).executes(NationCommands::alliances));
+        dispatcher.register((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal((String)"war").requires(source -> source.hasPermission(0))).executes(NationCommands::openWarMenu)).then(Commands.literal((String)"justify").then(Commands.argument((String)"country", (ArgumentType)StringArgumentType.word()).executes(NationCommands::justifyWar)))).then(Commands.literal((String)"declare").then(Commands.argument((String)"country", (ArgumentType)StringArgumentType.word()).executes(NationCommands::declareWar)))).then(Commands.literal((String)"accept").then(Commands.argument((String)"country", (ArgumentType)StringArgumentType.word()).executes(NationCommands::acceptWarDeclaration)))).then(Commands.literal((String)"reject").then(Commands.argument((String)"country", (ArgumentType)StringArgumentType.word()).executes(NationCommands::rejectWarDeclaration)))).then(Commands.literal((String)"join").then(Commands.argument((String)"country", (ArgumentType)StringArgumentType.word()).executes(NationCommands::requestWarJoin)))).then(Commands.literal((String)"acceptjoin").then(Commands.argument((String)"country", (ArgumentType)StringArgumentType.word()).executes(NationCommands::acceptWarJoin)))).then(Commands.literal((String)"rejectjoin").then(Commands.argument((String)"country", (ArgumentType)StringArgumentType.word()).executes(NationCommands::rejectWarJoin)))).then(Commands.literal((String)"defend").then(Commands.argument((String)"country", (ArgumentType)StringArgumentType.word()).executes(NationCommands::acceptAllianceDefense)))).then(Commands.literal((String)"declinedefense").then(Commands.argument((String)"country", (ArgumentType)StringArgumentType.word()).executes(NationCommands::declineAllianceDefense)))).then(Commands.literal((String)"leave").then(Commands.argument((String)"country", (ArgumentType)StringArgumentType.word()).executes(NationCommands::leaveWar)))).then(Commands.literal((String)"status").executes(NationCommands::openWarMenu)));
+        dispatcher.register((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal((String)"peace").requires(source -> source.hasPermission(0))).then(Commands.literal((String)"reject").then(Commands.argument((String)"country", (ArgumentType)StringArgumentType.word()).executes(NationCommands::rejectPeace)))).then(Commands.argument((String)"country", (ArgumentType)StringArgumentType.word()).executes(NationCommands::peace)));
+        dispatcher.register((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal((String)"surrender").requires(source -> source.hasPermission(0))).then(Commands.argument((String)"country", (ArgumentType)StringArgumentType.word()).executes(NationCommands::surrender)));
+    }
 
-   @SubscribeEvent
-   public static void serverTick(Post event) {
-      if (!PENDING_NATION_NAMES.isEmpty() && (long)event.getServer().getTickCount() % 20L == 0L) {
-         long tick = (long)event.getServer().getTickCount();
-         Iterator<Entry<UUID, NationCommands.PendingNationCreation>> iterator = PENDING_NATION_NAMES.entrySet().iterator();
-
-         while (iterator.hasNext()) {
-            Entry<UUID, NationCommands.PendingNationCreation> entry = iterator.next();
-            if (tick > entry.getValue().expiresTick) {
-               ServerPlayer player = event.getServer().getPlayerList().getPlayer(entry.getKey());
-               if (player != null) {
-                  fail(player, "Nation creation timed out. Use /nation create to start again.");
-               }
-
-               iterator.remove();
+    @SubscribeEvent
+    public static void serverTick(ServerTickEvent.Post event) {
+        if (PENDING_NATION_NAMES.isEmpty() || (long)event.getServer().getTickCount() % 20L != 0L) {
+            return;
+        }
+        long tick = event.getServer().getTickCount();
+        Iterator<Map.Entry<UUID, PendingNationCreation>> iterator = PENDING_NATION_NAMES.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<UUID, PendingNationCreation> entry = iterator.next();
+            if (tick <= entry.getValue().expiresTick) continue;
+            ServerPlayer player = event.getServer().getPlayerList().getPlayer(entry.getKey());
+            if (player != null) {
+                NationCommands.fail(player, "Nation creation timed out. Use /nation create to start again.");
             }
-         }
-      }
-   }
+            iterator.remove();
+        }
+    }
 
-   @SubscribeEvent
-   public static void loggedOut(PlayerLoggedOutEvent event) {
-      PENDING_NATION_NAMES.remove(event.getEntity().getUUID());
-   }
+    @SubscribeEvent
+    public static void loggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
+        PENDING_NATION_NAMES.remove(event.getEntity().getUUID());
+    }
 
-   @SubscribeEvent
-   public static void serverStopping(ServerStoppingEvent event) {
-      PENDING_NATION_NAMES.clear();
-   }
+    @SubscribeEvent
+    public static void serverStopping(ServerStoppingEvent event) {
+        PENDING_NATION_NAMES.clear();
+    }
 
-   @SubscribeEvent
-   public static void chatNameInput(ServerChatEvent event) {
-      ServerPlayer player = event.getPlayer();
-      NationCommands.PendingNationCreation pending = PENDING_NATION_NAMES.get(player.getUUID());
-      if (pending != null) {
-         event.setCanceled(true);
-         long tick = (long)player.getServer().getTickCount();
-         if (tick > pending.expiresTick) {
+    @SubscribeEvent
+    public static void chatNameInput(ServerChatEvent event) {
+        ServerPlayer player = event.getPlayer();
+        PendingNationCreation pending = PENDING_NATION_NAMES.get(player.getUUID());
+        if (pending == null) {
+            return;
+        }
+        event.setCanceled(true);
+        long tick = player.getServer().getTickCount();
+        if (tick > pending.expiresTick) {
             PENDING_NATION_NAMES.remove(player.getUUID());
-            fail(player, "Nation creation timed out. Use /nation create to start again.");
-         } else {
-            String name = event.getRawText().trim();
-            if (name.equalsIgnoreCase("cancel")) {
-               PENDING_NATION_NAMES.remove(player.getUUID());
-               fail(player, "Nation creation cancelled.");
-            } else if (createNationWithDoctrine(player, name, pending.doctrine)) {
-               PENDING_NATION_NAMES.remove(player.getUUID());
-            } else {
-               fail(player, "Type another nation name, or type cancel.");
-            }
-         }
-      }
-   }
-
-   private static int openNationCreateMenuUnnamed(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      return openNationCreateMenu(player, store, "");
-   }
-
-   private static int openNationCreateMenu(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      return openNationCreateMenu(player, store, StringArgumentType.getString(context, "name"));
-   }
-
-   private static int openNationCreateMenu(ServerPlayer player, NationStore store, String name) {
-      PENDING_NATION_NAMES.remove(player.getUUID());
-      if (!canStartNationCreation(player, store, name)) {
-         return 0;
-      } else if (store.availableDoctrines().isEmpty()) {
-         fail(player, "All doctrines are already taken.");
-         return 0;
-      } else {
-         player.openMenu(
-            new SimpleMenuProvider(
-               (containerId, inventory, viewer) -> new NationCreateMenu(containerId, inventory, name),
-               Component.literal(name.isBlank() ? "Create Nation" : "Create " + name)
-            )
-         );
-         return 1;
-      }
-   }
-
-   static boolean createNationWithDoctrine(ServerPlayer player, String name, Doctrine doctrine) {
-      NationStore store = NationStore.get();
-      if (NationStore.nationKey(name).length() < 3) {
-         fail(player, "Nation names need at least 3 letters or numbers.");
-         return false;
-      } else if (!canStartNationCreation(player, store, name)) {
-         return false;
-      } else if (store.isDoctrineTaken(doctrine)) {
-         fail(player, doctrine.displayName + " is already taken by another nation.");
-         return false;
-      } else {
-         ClaimKey capital = currentClaim(player);
-         if (store.nationOwning(capital).isPresent()) {
-            fail(player, "This chunk is already claimed.");
-            return false;
-         } else if (!OpacClaimsBridge.canMirrorClaim(player.getServer(), capital, player.getUUID())) {
-            fail(player, "Open Parties and Claims already has this chunk claimed. Unclaim it there first.");
-            return false;
-         } else {
-            NationStore.Nation nation = store.createNation(player, name, doctrine, capital);
+            NationCommands.fail(player, "Nation creation timed out. Use /nation create to start again.");
+            return;
+        }
+        String name = event.getRawText().trim();
+        if (name.equalsIgnoreCase("cancel")) {
             PENDING_NATION_NAMES.remove(player.getUUID());
-            player.refreshTabListName();
-            ok(player, "Created " + nation.name + " with " + doctrine.displayName + ". Command ID: " + nation.id + ". Capital: " + capital.shortName());
-            return true;
-         }
-      }
-   }
+            NationCommands.fail(player, "Nation creation cancelled.");
+            return;
+        }
+        if (NationCommands.createNationWithDoctrine(player, name, pending.doctrine)) {
+            PENDING_NATION_NAMES.remove(player.getUUID());
+            return;
+        }
+        NationCommands.fail(player, "Type another nation name, or type cancel.");
+    }
 
-   static void requestNationName(ServerPlayer player, Doctrine doctrine) {
-      NationStore store = NationStore.get();
-      if (canStartNationCreation(player, store, "")) {
-         if (store.isDoctrineTaken(doctrine)) {
-            fail(player, doctrine.displayName + " is already taken by another nation.");
-         } else {
-            PENDING_NATION_NAMES.put(player.getUUID(), new NationCommands.PendingNationCreation(doctrine, (long)player.getServer().getTickCount() + 1200L));
-            player.closeContainer();
-            ok(
-               player,
-               "Selected "
-                  + doctrine.displayName
-                  + ". Type your nation name in chat, or type cancel. Spaces are display-only; commands use the generated ID. You have 60 seconds."
-            );
-         }
-      }
-   }
+    private static int openNationCreateMenuUnnamed(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        return NationCommands.openNationCreateMenu(player, store, "");
+    }
 
-   private static boolean canStartNationCreation(ServerPlayer player, NationStore store, String name) {
-      if (store.hasNation(player.getUUID())) {
-         fail(player, "You are already in a nation.");
-         return false;
-      } else {
-         if (!name.isBlank()) {
+    private static int openNationCreateMenu(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        return NationCommands.openNationCreateMenu(player, store, StringArgumentType.getString(context, (String)"name"));
+    }
+
+    private static int openNationCreateMenu(ServerPlayer player, NationStore store, String name) {
+        PENDING_NATION_NAMES.remove(player.getUUID());
+        if (!NationCommands.canStartNationCreation(player, store, name)) {
+            return 0;
+        }
+        if (store.availableDoctrines().isEmpty()) {
+            NationCommands.fail(player, "All doctrines are already taken.");
+            return 0;
+        }
+        player.openMenu((MenuProvider)new SimpleMenuProvider((containerId, inventory, viewer) -> new NationCreateMenu(containerId, inventory, name), (Component)Component.literal((String)(name.isBlank() ? "Create Nation" : "Create " + name))));
+        return 1;
+    }
+
+    static boolean createNationWithDoctrine(ServerPlayer player, String name, Doctrine doctrine) {
+        NationStore store = NationStore.get();
+        if (NationStore.nationKey(name).length() < 3) {
+            NationCommands.fail(player, "Nation names need at least 3 letters or numbers.");
+            return false;
+        }
+        if (!NationCommands.canStartNationCreation(player, store, name)) {
+            return false;
+        }
+        if (store.isDoctrineTaken(doctrine)) {
+            NationCommands.fail(player, doctrine.displayName + " is already taken by another nation.");
+            return false;
+        }
+        ClaimKey capital = NationCommands.currentClaim(player);
+        if (store.nationOwning(capital).isPresent()) {
+            NationCommands.fail(player, "This chunk is already claimed.");
+            return false;
+        }
+        if (!OpacClaimsBridge.canMirrorClaim(player.getServer(), capital, player.getUUID())) {
+            NationCommands.fail(player, "Open Parties and Claims already has this chunk claimed. Unclaim it there first.");
+            return false;
+        }
+        NationStore.Nation nation = store.createNation(player, name, doctrine, capital);
+        PENDING_NATION_NAMES.remove(player.getUUID());
+        player.refreshTabListName();
+        NationCommands.ok(player, "Created " + nation.name + " with " + doctrine.displayName + ". Command ID: " + nation.id + ". Capital: " + capital.shortName());
+        return true;
+    }
+
+    static void requestNationName(ServerPlayer player, Doctrine doctrine) {
+        NationStore store = NationStore.get();
+        if (!NationCommands.canStartNationCreation(player, store, "")) {
+            return;
+        }
+        if (store.isDoctrineTaken(doctrine)) {
+            NationCommands.fail(player, doctrine.displayName + " is already taken by another nation.");
+            return;
+        }
+        PENDING_NATION_NAMES.put(player.getUUID(), new PendingNationCreation(doctrine, (long)player.getServer().getTickCount() + 1200L));
+        player.closeContainer();
+        NationCommands.ok(player, "Selected " + doctrine.displayName + ". Type your nation name in chat, or type cancel. Spaces are display-only; commands use the generated ID. You have 60 seconds.");
+    }
+
+    private static boolean canStartNationCreation(ServerPlayer player, NationStore store, String name) {
+        if (store.hasNation(player.getUUID())) {
+            NationCommands.fail(player, "You are already in a nation.");
+            return false;
+        }
+        if (!name.isBlank()) {
             String key = NationStore.nationKey(name);
             if (key.length() < 3) {
-               fail(player, "Nation names need at least 3 letters or numbers.");
-               return false;
+                NationCommands.fail(player, "Nation names need at least 3 letters or numbers.");
+                return false;
             }
-
             if (store.nationByName(name).isPresent()) {
-               fail(player, "That nation already exists.");
-               return false;
+                NationCommands.fail(player, "That nation already exists.");
+                return false;
             }
-         }
+        }
+        return true;
+    }
 
-         return true;
-      }
-   }
-
-   private static int joinNation(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      if (store.hasNation(player.getUUID())) {
-         fail(player, "You are already in a nation.");
-         return 0;
-      } else {
-         Optional<NationStore.Nation> nation = store.nationByName(StringArgumentType.getString(context, "name"));
-         if (nation.isEmpty()) {
-            fail(player, "No nation with that name exists.");
+    private static int joinNation(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        if (store.hasNation(player.getUUID())) {
+            NationCommands.fail(player, "You are already in a nation.");
             return 0;
-         } else {
-            store.addMember(player.getUUID(), nation.get());
-            PENDING_NATION_NAMES.remove(player.getUUID());
-            player.refreshTabListName();
-            ok(player, "Joined " + nation.get().name + ".");
-            return 1;
-         }
-      }
-   }
-
-   private static int ownNationInfo(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      Optional<NationStore.Nation> nation = NationStore.get().nationOf(player.getUUID());
-      if (nation.isEmpty()) {
-         fail(player, "You are not in a nation.");
-         return 0;
-      } else {
-         return describeNation(player, nation.get());
-      }
-   }
-
-   private static int nationInfo(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      Optional<NationStore.Nation> nation = NationStore.get().nationByName(StringArgumentType.getString(context, "name"));
-      if (nation.isEmpty()) {
-         fail(player, "No nation with that name exists.");
-         return 0;
-      } else {
-         return describeNation(player, nation.get());
-      }
-   }
-
-   private static int describeNation(ServerPlayer player, NationStore.Nation nation) {
-      NationStore store = NationStore.get();
-      Doctrine doctrine = nation.doctrine();
-      player.sendSystemMessage(Component.literal("Nation: " + nation.name));
-      player.sendSystemMessage(Component.literal("Command ID: " + nation.id));
-      player.sendSystemMessage(Component.literal("Leader: " + nation.ownerName));
-      player.sendSystemMessage(Component.literal("Doctrine: " + doctrine.displayName + " (" + doctrine.id + ", " + doctrine.ideology.displayName + ")"));
-      player.sendSystemMessage(Component.literal("Claims: " + store.claimCount(nation) + ", free claims left: " + nation.freeClaimsRemaining));
-      player.sendSystemMessage(Component.literal("Cities: " + nation.cityClaims.size()));
-      player.sendSystemMessage(Component.literal("Treasury: $" + NationStore.roundMoney(nation.balance)));
-      player.sendSystemMessage(Component.literal("Maintenance spending / 10min: $" + NationEvents.maintenanceDuePerInterval(store, nation)));
-      player.sendSystemMessage(Component.literal("Passive income / 10min: $" + NationEvents.passiveIncomePerTenMinutes(store, nation)));
-      store.allianceOf(nation).ifPresent(alliance -> player.sendSystemMessage(Component.literal("Alliance: " + alliance.name)));
-      player.sendSystemMessage(
-         Component.literal(
-            "Capital: " + (nation.capitalClaim != null && !nation.capitalClaim.isBlank() ? ClaimKey.parse(nation.capitalClaim).shortName() : "none")
-         )
-      );
-      return 1;
-   }
-
-   private static int claim(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
-      if (nation.isEmpty()) {
-         fail(player, "Create or join a nation first.");
-         return 0;
-      } else {
-         ClaimKey claim = currentClaim(player);
-         if (store.nationOwning(claim).isPresent()) {
-            fail(player, "This chunk is already claimed.");
+        }
+        Optional<NationStore.Nation> nation = store.nationByName(StringArgumentType.getString(context, (String)"name"));
+        if (nation.isEmpty()) {
+            NationCommands.fail(player, "No nation with that name exists.");
             return 0;
-         } else if (!OpacClaimsBridge.canMirrorClaim(player.getServer(), claim, UUID.fromString(nation.get().owner))) {
-            fail(player, "Open Parties and Claims already has this chunk claimed. Unclaim it there first.");
-            return 0;
-         } else if (store.claimCount(nation.get()) > 0 && !touchesNationClaim(store, nation.get(), claim)) {
-            fail(player, "New claims must touch one of your nation's chunks.");
-            return 0;
-         } else {
-            if (nation.get().freeClaimsRemaining > 0) {
-               nation.get().freeClaimsRemaining--;
-            } else {
-               double cost = claimCost(store, nation.get(), claim);
-               if (nation.get().balance + 1.0E-4 < cost) {
-                  fail(player, "Nation treasury needs $" + cost + " for this claim.");
-                  return 0;
-               }
+        }
+        store.addMember(player.getUUID(), nation.get());
+        PENDING_NATION_NAMES.remove(player.getUUID());
+        player.refreshTabListName();
+        NationCommands.ok(player, "Joined " + nation.get().name + ".");
+        return 1;
+    }
 
-               nation.get().balance = NationStore.roundMoney(nation.get().balance - cost);
+    private static int ownNationInfo(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        Optional<NationStore.Nation> nation = NationStore.get().nationOf(player.getUUID());
+        if (nation.isEmpty()) {
+            NationCommands.fail(player, "You are not in a nation.");
+            return 0;
+        }
+        return NationCommands.describeNation(player, nation.get());
+    }
+
+    private static int nationInfo(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        Optional<NationStore.Nation> nation = NationStore.get().nationByName(StringArgumentType.getString(context, (String)"name"));
+        if (nation.isEmpty()) {
+            NationCommands.fail(player, "No nation with that name exists.");
+            return 0;
+        }
+        return NationCommands.describeNation(player, nation.get());
+    }
+
+    private static int describeNation(ServerPlayer player, NationStore.Nation nation) {
+        NationStore store = NationStore.get();
+        Doctrine doctrine = nation.doctrine();
+        player.sendSystemMessage((Component)Component.literal((String)("Nation: " + nation.name)));
+        player.sendSystemMessage((Component)Component.literal((String)("Command ID: " + nation.id)));
+        player.sendSystemMessage((Component)Component.literal((String)("Leader: " + nation.ownerName)));
+        player.sendSystemMessage((Component)Component.literal((String)("Doctrine: " + doctrine.displayName + " (" + doctrine.id + ", " + doctrine.ideology.displayName + ")")));
+        player.sendSystemMessage((Component)Component.literal((String)("Claims: " + store.claimCount(nation) + ", free claims left: " + nation.freeClaimsRemaining)));
+        player.sendSystemMessage((Component)Component.literal((String)("Cities: " + nation.cityClaims.size())));
+        player.sendSystemMessage((Component)Component.literal((String)("Treasury: $" + NationStore.roundMoney(nation.balance))));
+        player.sendSystemMessage((Component)Component.literal((String)("Maintenance spending / 10min: $" + NationEvents.maintenanceDuePerInterval(store, nation))));
+        player.sendSystemMessage((Component)Component.literal((String)("Passive income / 10min: $" + NationEvents.passiveIncomePerTenMinutes(store, nation))));
+        store.allianceOf(nation).ifPresent(alliance -> player.sendSystemMessage((Component)Component.literal((String)("Alliance: " + alliance.name))));
+        player.sendSystemMessage((Component)Component.literal((String)("Capital: " + (nation.capitalClaim == null || nation.capitalClaim.isBlank() ? "none" : ClaimKey.parse(nation.capitalClaim).shortName()))));
+        return 1;
+    }
+
+    private static int claim(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
+        if (nation.isEmpty()) {
+            NationCommands.fail(player, "Create or join a nation first.");
+            return 0;
+        }
+        ClaimKey claim = NationCommands.currentClaim(player);
+        if (store.nationOwning(claim).isPresent()) {
+            NationCommands.fail(player, "This chunk is already claimed.");
+            return 0;
+        }
+        if (!OpacClaimsBridge.canMirrorClaim(player.getServer(), claim, UUID.fromString(nation.get().owner))) {
+            NationCommands.fail(player, "Open Parties and Claims already has this chunk claimed. Unclaim it there first.");
+            return 0;
+        }
+        if (store.claimCount(nation.get()) > 0 && !NationCommands.touchesNationClaim(store, nation.get(), claim)) {
+            NationCommands.fail(player, "New claims must touch one of your nation's chunks.");
+            return 0;
+        }
+        if (nation.get().freeClaimsRemaining > 0) {
+            --nation.get().freeClaimsRemaining;
+        } else {
+            double cost = NationCommands.claimCost(store, nation.get(), claim);
+            if (nation.get().balance + 1.0E-4 < cost) {
+                NationCommands.fail(player, "Nation treasury needs $" + cost + " for this claim.");
+                return 0;
             }
+            nation.get().balance = NationStore.roundMoney(nation.get().balance - cost);
+        }
+        store.claim(nation.get(), claim);
+        NationCommands.ok(player, "Claimed " + claim.shortName() + ".");
+        return 1;
+    }
 
-            store.claim(nation.get(), claim);
-            ok(player, "Claimed " + claim.shortName() + ".");
+    private static int buyClaim(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> buyer = store.nationOf(player.getUUID());
+        if (buyer.isEmpty()) {
+            NationCommands.fail(player, "Create or join a nation first.");
+            return 0;
+        }
+        if (!store.isOwner(player.getUUID(), buyer.get())) {
+            NationCommands.fail(player, "Only the nation owner can buy land for the nation.");
+            return 0;
+        }
+        ClaimKey claim = NationCommands.currentClaim(player);
+        Optional<NationStore.Nation> seller = store.nationOwning(claim);
+        if (seller.isEmpty() || seller.get().id.equals(buyer.get().id)) {
+            NationCommands.fail(player, "Stand in another nation's claim to buy it.");
+            return 0;
+        }
+        if (claim.id().equals(seller.get().capitalClaim)) {
+            NationCommands.fail(player, "You cannot buy another nation's capital.");
+            return 0;
+        }
+        if (!NationCommands.touchesNationClaim(store, buyer.get(), claim)) {
+            NationCommands.fail(player, "The claim you buy must border one of your claims.");
+            return 0;
+        }
+        if (store.activeWarForCapture(buyer.get(), seller.get()).isPresent() || store.activeWarForCapture(seller.get(), buyer.get()).isPresent()) {
+            NationCommands.fail(player, "You cannot buy land from a nation you are fighting.");
+            return 0;
+        }
+        double cost = NationStore.roundMoney(Math.max(250.0, NationCommands.claimCost(store, buyer.get(), claim) * 2.0));
+        if (buyer.get().balance + 1.0E-4 < cost) {
+            NationCommands.fail(player, "Nation treasury needs $" + cost + " to buy this land.");
+            return 0;
+        }
+        Optional<NationStore.LandPurchaseOffer> existing = store.landPurchaseOfferForClaim(buyer.get().id, seller.get().id, claim.id());
+        if (existing.isPresent()) {
+            NationCommands.fail(player, "Your nation already has a pending offer #" + existing.get().id + " for this claim.");
+            return 0;
+        }
+        NationStore.LandPurchaseOffer offer = store.createLandPurchaseOffer(buyer.get(), seller.get(), claim.id(), cost, player, player.getServer().getTickCount());
+        store.notifyNation(player.getServer(), seller.get(), (Component)Component.literal((String)("[NationWars] " + buyer.get().name + " offered $" + cost + " for " + claim.shortName() + ". Use /nation buyclaim accept " + offer.id + " or /nation buyclaim reject " + offer.id + ".")));
+        NationCommands.ok(player, "Sent land purchase offer #" + offer.id + " to " + seller.get().name + " for " + claim.shortName() + " ($" + cost + ").");
+        return 1;
+    }
+
+    private static int buyClaimList(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
+        if (nation.isEmpty()) {
+            NationCommands.fail(player, "Create or join a nation first.");
+            return 0;
+        }
+        List<NationStore.LandPurchaseOffer> offers = store.landPurchaseOffersFor(nation.get());
+        if (offers.isEmpty()) {
+            NationCommands.ok(player, "No pending land purchase offers.");
             return 1;
-         }
-      }
-   }
+        }
+        player.sendSystemMessage((Component)Component.literal((String)"[NationWars] Pending land purchase offers:"));
+        for (NationStore.LandPurchaseOffer offer : offers) {
+            player.sendSystemMessage((Component)Component.literal((String)("  " + NationCommands.describeOffer(store, offer, nation.get()))));
+        }
+        return 1;
+    }
 
-   private static int buyClaim(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> buyer = store.nationOf(player.getUUID());
-      if (buyer.isEmpty()) {
-         fail(player, "Create or join a nation first.");
-         return 0;
-      } else if (!store.isOwner(player.getUUID(), buyer.get())) {
-         fail(player, "Only the nation owner can buy land for the nation.");
-         return 0;
-      } else {
-         ClaimKey claim = currentClaim(player);
-         Optional<NationStore.Nation> seller = store.nationOwning(claim);
-         if (seller.isEmpty() || seller.get().id.equals(buyer.get().id)) {
-            fail(player, "Stand in another nation's claim to buy it.");
+    private static int buyClaimAccept(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ClaimKey claim;
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        int id = IntegerArgumentType.getInteger(context, (String)"id");
+        NationStore store = NationStore.get();
+        Optional<NationStore.LandPurchaseOffer> maybeOffer = store.landPurchaseOffer(id);
+        if (maybeOffer.isEmpty()) {
+            NationCommands.fail(player, "No pending land purchase offer with that ID.");
             return 0;
-         } else if (claim.id().equals(seller.get().capitalClaim)) {
-            fail(player, "You cannot buy another nation's capital.");
+        }
+        NationStore.LandPurchaseOffer offer = maybeOffer.get();
+        NationStore.Nation seller = store.nationById(offer.seller).orElse(null);
+        NationStore.Nation buyer = store.nationById(offer.buyer).orElse(null);
+        if (seller == null || buyer == null) {
+            store.removeLandPurchaseOffer(offer);
+            NationCommands.fail(player, "That land purchase offer is stale and was removed.");
             return 0;
-         } else if (!touchesNationClaim(store, buyer.get(), claim)) {
-            fail(player, "The claim you buy must border one of your claims.");
+        }
+        if (!store.isOwner(player.getUUID(), seller)) {
+            NationCommands.fail(player, "Only the selling nation owner can accept this offer.");
             return 0;
-         } else if (!store.activeWarForCapture(buyer.get(), seller.get()).isPresent() && !store.activeWarForCapture(seller.get(), buyer.get()).isPresent()) {
-            double cost = NationStore.roundMoney(Math.max(250.0, claimCost(store, buyer.get(), claim) * 2.0));
-            if (buyer.get().balance + 1.0E-4 < cost) {
-               fail(player, "Nation treasury needs $" + cost + " to buy this land.");
-               return 0;
-            } else {
-               buyer.get().balance = NationStore.roundMoney(buyer.get().balance - cost);
-               seller.get().balance = NationStore.roundMoney(seller.get().balance + cost);
-               store.transferClaim(claim.id(), buyer.get());
-               store.save();
-               store.notifyNation(
-                  player.getServer(),
-                  seller.get(),
-                  Component.literal("[NationWars] " + buyer.get().name + " bought " + claim.shortName() + " for $" + cost + ".")
-               );
-               ok(player, "Bought " + claim.shortName() + " from " + seller.get().name + " for $" + cost + ".");
-               return 1;
+        }
+        try {
+            claim = ClaimKey.parse(offer.claimId);
+        }
+        catch (RuntimeException exception) {
+            store.removeLandPurchaseOffer(offer);
+            NationCommands.fail(player, "That land purchase offer had an invalid claim and was removed.");
+            return 0;
+        }
+        if (!NationCommands.validateLandPurchaseOffer(player, store, offer, buyer, seller, claim, true)) {
+            return 0;
+        }
+        buyer.balance = NationStore.roundMoney(buyer.balance - offer.price);
+        seller.balance = NationStore.roundMoney(seller.balance + offer.price);
+        store.transferClaim(claim.id(), buyer);
+        store.removeLandPurchaseOffer(offer);
+        store.notifyNation(player.getServer(), buyer, (Component)Component.literal((String)("[NationWars] " + seller.name + " accepted your offer for " + claim.shortName() + ". Paid $" + offer.price + ".")));
+        store.notifyNation(player.getServer(), seller, (Component)Component.literal((String)("[NationWars] Accepted " + buyer.name + "'s offer for " + claim.shortName() + ". Received $" + offer.price + ".")));
+        return 1;
+    }
+
+    private static int buyClaimReject(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        int id = IntegerArgumentType.getInteger(context, (String)"id");
+        NationStore store = NationStore.get();
+        Optional<NationStore.LandPurchaseOffer> maybeOffer = store.landPurchaseOffer(id);
+        if (maybeOffer.isEmpty()) {
+            NationCommands.fail(player, "No pending land purchase offer with that ID.");
+            return 0;
+        }
+        NationStore.LandPurchaseOffer offer = maybeOffer.get();
+        NationStore.Nation seller = store.nationById(offer.seller).orElse(null);
+        NationStore.Nation buyer = store.nationById(offer.buyer).orElse(null);
+        if (seller == null || buyer == null) {
+            store.removeLandPurchaseOffer(offer);
+            NationCommands.fail(player, "That land purchase offer is stale and was removed.");
+            return 0;
+        }
+        boolean sellerOwner = store.isOwner(player.getUUID(), seller);
+        boolean buyerOwner = store.isOwner(player.getUUID(), buyer);
+        if (!sellerOwner && !buyerOwner) {
+            NationCommands.fail(player, "Only the buying or selling nation owner can reject this offer.");
+            return 0;
+        }
+        ClaimKey claim = ClaimKey.parse(offer.claimId);
+        store.removeLandPurchaseOffer(offer);
+        if (sellerOwner) {
+            store.notifyNation(player.getServer(), buyer, (Component)Component.literal((String)("[NationWars] " + seller.name + " rejected your offer for " + claim.shortName() + ".")));
+            NationCommands.ok(player, "Rejected land purchase offer #" + offer.id + ".");
+        } else {
+            store.notifyNation(player.getServer(), seller, (Component)Component.literal((String)("[NationWars] " + buyer.name + " cancelled their offer for " + claim.shortName() + ".")));
+            NationCommands.ok(player, "Cancelled land purchase offer #" + offer.id + ".");
+        }
+        return 1;
+    }
+
+    private static boolean validateLandPurchaseOffer(ServerPlayer player, NationStore store, NationStore.LandPurchaseOffer offer, NationStore.Nation buyer, NationStore.Nation seller, ClaimKey claim, boolean removeStale) {
+        if (!seller.id.equals(store.nationOwning(claim).map(owned -> owned.id).orElse(""))) {
+            if (removeStale) {
+                store.removeLandPurchaseOffer(offer);
             }
-         } else {
-            fail(player, "You cannot buy land from a nation you are fighting.");
-            return 0;
-         }
-      }
-   }
-
-   private static int buyCity(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
-      if (nation.isEmpty()) {
-         fail(player, "Create or join a nation first.");
-         return 0;
-      } else if (!store.isOwner(player.getUUID(), nation.get())) {
-         fail(player, "Only the nation owner can buy city income claims.");
-         return 0;
-      } else if (!nation.get().doctrine().canBuyCities) {
-         fail(player, "Only the United States doctrine can buy city income claims.");
-         return 0;
-      } else {
-         ClaimKey claim = currentClaim(player);
-         if (!nation.get().id.equals(store.nationOwning(claim).map(owned -> owned.id).orElse(""))) {
-            fail(player, "Stand in one of your nation's claims.");
-            return 0;
-         } else {
-            double cityCost = claimCost(store, nation.get(), claim);
-            if (!store.addCityClaim(nation.get(), claim.id(), cityCost)) {
-               fail(player, "This claim is already a city or your treasury needs $" + NationStore.roundMoney(cityCost) + ".");
-               return 0;
-            } else {
-               ok(player, "City income enabled for " + claim.shortName() + " for $" + NationStore.roundMoney(cityCost) + ".");
-               return 1;
+            NationCommands.fail(player, "That claim is no longer owned by the selling nation. Offer removed.");
+            return false;
+        }
+        if (claim.id().equals(seller.capitalClaim)) {
+            if (removeStale) {
+                store.removeLandPurchaseOffer(offer);
             }
-         }
-      }
-   }
+            NationCommands.fail(player, "That claim is now the seller's capital. Offer removed.");
+            return false;
+        }
+        if (!NationCommands.touchesNationClaim(store, buyer, claim)) {
+            NationCommands.fail(player, "The offered claim no longer borders the buying nation.");
+            return false;
+        }
+        if (store.activeWarForCapture(buyer, seller).isPresent() || store.activeWarForCapture(seller, buyer).isPresent()) {
+            NationCommands.fail(player, "The buying and selling nations are currently at war.");
+            return false;
+        }
+        if (buyer.balance + 1.0E-4 < offer.price) {
+            NationCommands.fail(player, buyer.name + " no longer has enough treasury money for this offer.");
+            return false;
+        }
+        return true;
+    }
 
-   private static int unclaim(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
-      if (nation.isEmpty()) {
-         fail(player, "Create or join a nation first.");
-         return 0;
-      } else if (!store.isOwner(player.getUUID(), nation.get())) {
-         fail(player, "Only the nation owner can unclaim chunks.");
-         return 0;
-      } else {
-         ClaimKey claim = currentClaim(player);
-         if (!store.unclaim(nation.get(), claim)) {
-            fail(player, "This is not your claim, or it is your capital.");
+    private static String describeOffer(NationStore store, NationStore.LandPurchaseOffer offer, NationStore.Nation viewerNation) {
+        String buyer = store.nationById(offer.buyer).map(nation -> nation.name).orElse(offer.buyer);
+        String seller = store.nationById(offer.seller).map(nation -> nation.name).orElse(offer.seller);
+        String claim = ClaimKey.parse(offer.claimId).shortName();
+        String side = viewerNation.id.equals(offer.seller) ? "incoming" : "outgoing";
+        return "#" + offer.id + " " + side + ": " + buyer + " offers $" + offer.price + " to " + seller + " for " + claim;
+    }
+
+    private static int buyCity(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
+        if (nation.isEmpty()) {
+            NationCommands.fail(player, "Create or join a nation first.");
             return 0;
-         } else {
-            ok(player, "Unclaimed " + claim.shortName() + ".");
-            return 1;
-         }
-      }
-   }
-
-   private static int nationBalance(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
-      if (nation.isEmpty()) {
-         fail(player, "You are not in a nation.");
-         return 0;
-      } else {
-         ok(player, "Player: $" + store.playerBalance(player.getUUID()) + " | " + nation.get().name + ": $" + NationStore.roundMoney(nation.get().balance));
-         return 1;
-      }
-   }
-
-   private static int deposit(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
-      if (nation.isEmpty()) {
-         fail(player, "You are not in a nation.");
-         return 0;
-      } else {
-         double amount = DoubleArgumentType.getDouble(context, "amount");
-         if (!store.depositToNation(player.getUUID(), nation.get(), amount)) {
-            fail(player, "You do not have enough money.");
+        }
+        if (!store.isOwner(player.getUUID(), nation.get())) {
+            NationCommands.fail(player, "Only the nation owner can buy city income claims.");
             return 0;
-         } else {
-            ok(player, "Deposited $" + NationStore.roundMoney(amount) + " to " + nation.get().name + ".");
-            return 1;
-         }
-      }
-   }
-
-   private static int doctrines(CommandContext<CommandSourceStack> context) {
-      ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("Doctrines: " + Doctrine.choices()), false);
-
-      for (Doctrine doctrine : Doctrine.values()) {
-         String header = doctrine.id + " - " + doctrine.displayName + " (" + doctrine.ideology.displayName + ")";
-         String stats = "  free "
-            + doctrine.freeClaims
-            + " | claim x"
-            + doctrine.claimCostMultiplier
-            + " | maint x"
-            + doctrine.maintenanceMultiplier
-            + " | cap "
-            + doctrine.captureSeconds
-            + "s";
-         ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal(header), false);
-         ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal(stats), false);
-
-         for (String perk : doctrine.perkLore()) {
-            ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("  " + perk), false);
-         }
-      }
-
-      return 1;
-   }
-
-   private static int openDoctrinesMenu(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      player.openMenu(new SimpleMenuProvider((containerId, inventory, viewer) -> new DoctrineMenu(containerId, inventory), Component.literal("Doctrines")));
-      return 1;
-   }
-
-   private static int syncOpac(CommandContext<CommandSourceStack> context) {
-      OpacClaimsBridge.syncAll(((CommandSourceStack)context.getSource()).getServer(), NationStore.get());
-      ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("NationWars claims synced to Open Parties and Claims."), true);
-      return 1;
-   }
-
-   private static int money(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      ok(player, "Balance: $" + NationStore.get().playerBalance(player.getUUID()));
-      return 1;
-   }
-
-   private static int openMarket(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      player.openMenu(new SimpleMenuProvider((containerId, inventory, viewer) -> new MarketMenu(containerId, inventory), Component.literal("Market")));
-      return 1;
-   }
-
-   private static int openWarMenu(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      player.openMenu(new SimpleMenuProvider((containerId, inventory, viewer) -> new WarMenu(containerId, inventory), Component.literal("Wars")));
-      return 1;
-   }
-
-   private static int sellHand(CommandContext<CommandSourceStack> context, double requestedPrice) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      ItemStack stack = player.getMainHandItem();
-      if (stack.isEmpty()) {
-         fail(player, "Hold an item to sell it.");
-         return 0;
-      } else {
-         double price = requestedPrice > 0.0 ? requestedPrice : appraise(stack);
-         if (price <= 0.0) {
-            fail(player, "Set a price with /market sellhand <price>.");
+        }
+        if (!nation.get().doctrine().canBuyCities) {
+            NationCommands.fail(player, "Only the United States doctrine can buy city income claims.");
             return 0;
-         } else {
-            int count = stack.getCount();
-            String itemName = stack.getHoverName().getString();
-            ItemStack listed = stack.copy();
-            stack.setCount(0);
-            NationStore.MarketListing listing = NationStore.get().createMarketListing(player, listed, price);
-            ok(player, "Listed " + count + "x " + itemName + " for $" + NationStore.roundMoney(price) + " as listing #" + listing.id + ".");
-            return 1;
-         }
-      }
-   }
+        }
+        ClaimKey claim = NationCommands.currentClaim(player);
+        if (!nation.get().id.equals(store.nationOwning(claim).map(owned -> owned.id).orElse(""))) {
+            NationCommands.fail(player, "Stand in one of your nation's claims.");
+            return 0;
+        }
+        double cityCost = NationCommands.claimCost(store, nation.get(), claim);
+        if (!store.addCityClaim(nation.get(), claim.id(), cityCost)) {
+            NationCommands.fail(player, "This claim is already a city or your treasury needs $" + NationStore.roundMoney(cityCost) + ".");
+            return 0;
+        }
+        NationCommands.ok(player, "City income enabled for " + claim.shortName() + " for $" + NationStore.roundMoney(cityCost) + ".");
+        return 1;
+    }
 
-   private static int cancelListing(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      int id = IntegerArgumentType.getInteger(context, "id");
-      NationStore.MarketListing listing = store.marketListing(id).orElse(null);
-      if (listing == null) {
-         fail(player, "No listing with that id exists.");
-         return 0;
-      } else if (!listing.seller.equals(player.getUUID().toString())) {
-         fail(player, "You can only cancel your own listings.");
-         return 0;
-      } else {
-         ItemStack stack = store.listingStack(listing, player.registryAccess());
-         store.removeMarketListing(id);
-         if (!stack.isEmpty()) {
+    private static int unclaim(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
+        if (nation.isEmpty()) {
+            NationCommands.fail(player, "Create or join a nation first.");
+            return 0;
+        }
+        if (!store.isOwner(player.getUUID(), nation.get())) {
+            NationCommands.fail(player, "Only the nation owner can unclaim chunks.");
+            return 0;
+        }
+        ClaimKey claim = NationCommands.currentClaim(player);
+        if (!store.unclaim(nation.get(), claim)) {
+            NationCommands.fail(player, "This is not your claim, or it is your capital.");
+            return 0;
+        }
+        NationCommands.ok(player, "Unclaimed " + claim.shortName() + ".");
+        return 1;
+    }
+
+    private static int nationBalance(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
+        if (nation.isEmpty()) {
+            NationCommands.fail(player, "You are not in a nation.");
+            return 0;
+        }
+        NationCommands.ok(player, "Player: $" + store.playerBalance(player.getUUID()) + " | " + nation.get().name + ": $" + NationStore.roundMoney(nation.get().balance));
+        return 1;
+    }
+
+    private static int deposit(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
+        if (nation.isEmpty()) {
+            NationCommands.fail(player, "You are not in a nation.");
+            return 0;
+        }
+        double amount = DoubleArgumentType.getDouble(context, (String)"amount");
+        if (!store.depositToNation(player.getUUID(), nation.get(), amount)) {
+            NationCommands.fail(player, "You do not have enough money.");
+            return 0;
+        }
+        NationCommands.ok(player, "Deposited $" + NationStore.roundMoney(amount) + " to " + nation.get().name + ".");
+        return 1;
+    }
+
+    private static int doctrines(CommandContext<CommandSourceStack> context) {
+        ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)("Doctrines: " + Doctrine.choices())), false);
+        for (Doctrine doctrine : Doctrine.values()) {
+            String header = doctrine.id + " - " + doctrine.displayName + " (" + doctrine.ideology.displayName + ")";
+            String stats = "  free " + doctrine.freeClaims + " | claim x" + doctrine.claimCostMultiplier + " | maint x" + doctrine.maintenanceMultiplier + " | cap " + doctrine.captureSeconds + "s";
+            ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)header), false);
+            ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)stats), false);
+            for (String perk : doctrine.perkLore()) {
+                ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)("  " + perk)), false);
+            }
+        }
+        return 1;
+    }
+
+    private static int openDoctrinesMenu(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        player.openMenu((MenuProvider)new SimpleMenuProvider((containerId, inventory, viewer) -> new DoctrineMenu(containerId, inventory), (Component)Component.literal((String)"Doctrines")));
+        return 1;
+    }
+
+    private static int syncOpac(CommandContext<CommandSourceStack> context) {
+        OpacClaimsBridge.syncAll(((CommandSourceStack)context.getSource()).getServer(), NationStore.get());
+        ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)"NationWars claims synced to Open Parties and Claims."), true);
+        return 1;
+    }
+
+    private static int money(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationCommands.ok(player, "Balance: $" + NationStore.get().playerBalance(player.getUUID()));
+        return 1;
+    }
+
+    private static int openMarket(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        player.openMenu((MenuProvider)new SimpleMenuProvider((containerId, inventory, viewer) -> new MarketMenu(containerId, inventory), (Component)Component.literal((String)"Market")));
+        return 1;
+    }
+
+    private static int openWarMenu(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        player.openMenu((MenuProvider)new SimpleMenuProvider((containerId, inventory, viewer) -> new WarMenu(containerId, inventory), (Component)Component.literal((String)"Wars")));
+        return 1;
+    }
+
+    private static int sellHand(CommandContext<CommandSourceStack> context, double requestedPrice) throws CommandSyntaxException {
+        double price;
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        ItemStack stack = player.getMainHandItem();
+        if (stack.isEmpty()) {
+            NationCommands.fail(player, "Hold an item to sell it.");
+            return 0;
+        }
+        double d = price = requestedPrice > 0.0 ? requestedPrice : NationCommands.appraise(stack);
+        if (price <= 0.0) {
+            NationCommands.fail(player, "Set a price with /market sellhand <price>.");
+            return 0;
+        }
+        int count = stack.getCount();
+        String itemName = stack.getHoverName().getString();
+        ItemStack listed = stack.copy();
+        stack.setCount(0);
+        NationStore.MarketListing listing = NationStore.get().createMarketListing(player, listed, price);
+        NationCommands.ok(player, "Listed " + count + "x " + itemName + " for $" + NationStore.roundMoney(price) + " as listing #" + listing.id + ".");
+        return 1;
+    }
+
+    private static int cancelListing(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        int id;
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        NationStore.MarketListing listing = store.marketListing(id = IntegerArgumentType.getInteger(context, (String)"id")).orElse(null);
+        if (listing == null) {
+            NationCommands.fail(player, "No listing with that id exists.");
+            return 0;
+        }
+        if (!listing.seller.equals(player.getUUID().toString())) {
+            NationCommands.fail(player, "You can only cancel your own listings.");
+            return 0;
+        }
+        ItemStack stack = store.listingStack(listing, (HolderLookup.Provider)player.registryAccess());
+        store.removeMarketListing(id);
+        if (!stack.isEmpty()) {
             player.getInventory().placeItemBackInInventory(stack);
-         }
+        }
+        NationCommands.ok(player, "Canceled listing #" + id + ".");
+        return 1;
+    }
 
-         ok(player, "Canceled listing #" + id + ".");
-         return 1;
-      }
-   }
+    private static int nations(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        player.openMenu((MenuProvider)new SimpleMenuProvider((containerId, inventory, viewer) -> new NationsMenu(containerId, inventory), (Component)Component.literal((String)"Nations")));
+        return 1;
+    }
 
-   private static int nations(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      player.openMenu(new SimpleMenuProvider((containerId, inventory, viewer) -> new NationsMenu(containerId, inventory), Component.literal("Nations")));
-      return 1;
-   }
-
-   private static int spy(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> spyNation = store.nationOf(player.getUUID());
-      Optional<NationStore.Nation> target = store.nationByName(StringArgumentType.getString(context, "country"));
-      if (!spyNation.isEmpty() && !target.isEmpty() && !spyNation.get().id.equals(target.get().id)) {
-         Optional<NationStore.SpyMission> existingMission = store.activeSpyMission(player.getUUID());
-         if (existingMission.isPresent()) {
+    private static int spy(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> spyNation = store.nationOf(player.getUUID());
+        Optional<NationStore.Nation> target = store.nationByName(StringArgumentType.getString(context, (String)"country"));
+        if (spyNation.isEmpty() || target.isEmpty() || spyNation.get().id.equals(target.get().id)) {
+            NationCommands.fail(player, "Pick another existing nation to spy on.");
+            return 0;
+        }
+        Optional<NationStore.SpyMission> existingMission = store.activeSpyMission(player.getUUID());
+        if (existingMission.isPresent()) {
             long secondsLeft = Math.max(1L, (existingMission.get().completeTick - (long)player.getServer().getTickCount()) / 20L);
-            fail(player, "You already have spy mission #" + existingMission.get().id + " running. " + secondsLeft + " seconds left.");
+            NationCommands.fail(player, "You already have spy mission #" + existingMission.get().id + " running. " + secondsLeft + " seconds left.");
             return 0;
-         } else {
-            long tick = (long)player.getServer().getTickCount();
-            long cooldownUntil = store.spyCooldownUntil(player.getUUID());
-            if (cooldownUntil > tick) {
-               long secondsLeft = Math.max(1L, (cooldownUntil - tick) / 20L);
-               fail(player, "/spy is on cooldown for " + secondsLeft + " seconds.");
-               return 0;
-            } else {
-               long completeTick = tick + 2400L;
-               NationStore.SpyMission mission = store.createSpyMission(player, spyNation.get(), target.get(), completeTick);
-               store.setSpyCooldown(player.getUUID(), tick + 36000L);
-               ok(player, "Spy mission #" + mission.id + " started against " + target.get().name + ". Report in 120 seconds.");
-               return 1;
-            }
-         }
-      } else {
-         fail(player, "Pick another existing nation to spy on.");
-         return 0;
-      }
-   }
+        }
+        long tick = player.getServer().getTickCount();
+        long cooldownUntil = store.spyCooldownUntil(player.getUUID());
+        if (cooldownUntil > tick) {
+            long secondsLeft = Math.max(1L, (cooldownUntil - tick) / 20L);
+            NationCommands.fail(player, "/spy is on cooldown for " + secondsLeft + " seconds.");
+            return 0;
+        }
+        long completeTick = tick + 2400L;
+        NationStore.SpyMission mission = store.createSpyMission(player, spyNation.get(), target.get(), completeTick);
+        store.setSpyCooldown(player.getUUID(), tick + 36000L);
+        NationCommands.ok(player, "Spy mission #" + mission.id + " started against " + target.get().name + ". Report in 120 seconds.");
+        return 1;
+    }
 
-   private static int allianceCreate(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
-      if (!nation.isEmpty() && store.isOwner(player.getUUID(), nation.get())) {
-         String name = StringArgumentType.getString(context, "name");
-         if (!store.createAlliance(nation.get(), name)) {
-            fail(player, "Could not create alliance. You may already be in one, or that name is taken.");
+    private static int allianceCreate(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
+        if (nation.isEmpty() || !store.isOwner(player.getUUID(), nation.get())) {
+            NationCommands.fail(player, "Only a nation owner can create an alliance.");
             return 0;
-         } else {
-            ok(player, "Created alliance " + name + ".");
+        }
+        String name = StringArgumentType.getString(context, (String)"name");
+        if (!store.createAlliance(nation.get(), name)) {
+            NationCommands.fail(player, "Could not create alliance. You may already be in one, or that name is taken.");
+            return 0;
+        }
+        NationCommands.ok(player, "Created alliance " + name + ".");
+        return 1;
+    }
+
+    private static int allianceInvite(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> inviter = store.nationOf(player.getUUID());
+        Optional<NationStore.Nation> invited = store.nationByName(StringArgumentType.getString(context, (String)"country"));
+        if (inviter.isEmpty() || invited.isEmpty()) {
+            NationCommands.fail(player, "Both sides must be nations.");
+            return 0;
+        }
+        Optional<NationStore.Alliance> alliance = store.allianceOf(inviter.get());
+        if (alliance.isEmpty()) {
+            NationCommands.fail(player, "Your nation is not in an alliance.");
+            return 0;
+        }
+        if (!store.inviteToAlliance(alliance.get(), inviter.get(), invited.get())) {
+            NationCommands.fail(player, "Could not invite that nation.");
+            return 0;
+        }
+        store.notifyNation(player.getServer(), invited.get(), (Component)Component.literal((String)("[NationWars] " + inviter.get().name + " invited you to alliance " + alliance.get().name + ". Use /alliance accept " + alliance.get().id + ".")));
+        NationCommands.ok(player, "Alliance invite sent to " + invited.get().name + ".");
+        return 1;
+    }
+
+    private static int allianceAccept(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
+        Optional<NationStore.Alliance> alliance = store.allianceByName(StringArgumentType.getString(context, (String)"name"));
+        if (nation.isEmpty() || alliance.isEmpty()) {
+            NationCommands.fail(player, "No matching nation or alliance.");
+            return 0;
+        }
+        if (!store.isOwner(player.getUUID(), nation.get())) {
+            NationCommands.fail(player, "Only the nation owner can accept alliance invites.");
+            return 0;
+        }
+        if (!store.acceptAllianceInvite(alliance.get(), nation.get())) {
+            NationCommands.fail(player, "No invite from that alliance.");
+            return 0;
+        }
+        store.notifyNation(player.getServer(), nation.get(), (Component)Component.literal((String)("[NationWars] Joined alliance " + alliance.get().name + ".")));
+        return 1;
+    }
+
+    private static int allianceKick(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> actor = store.nationOf(player.getUUID());
+        Optional<NationStore.Nation> kicked = store.nationByName(StringArgumentType.getString(context, (String)"country"));
+        if (actor.isEmpty() || kicked.isEmpty()) {
+            NationCommands.fail(player, "Both sides must be nations.");
+            return 0;
+        }
+        Optional<NationStore.Alliance> alliance = store.allianceOf(actor.get());
+        if (alliance.isEmpty() || !store.kickFromAlliance(alliance.get(), actor.get(), kicked.get())) {
+            NationCommands.fail(player, "Only the alliance leader can kick member nations.");
+            return 0;
+        }
+        store.notifyNation(player.getServer(), kicked.get(), (Component)Component.literal((String)("[NationWars] You were kicked from alliance " + alliance.get().name + ".")));
+        NationCommands.ok(player, "Kicked " + kicked.get().name + " from " + alliance.get().name + ".");
+        return 1;
+    }
+
+    private static int allianceInfo(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        Optional<NationStore.Nation> nation = NationStore.get().nationOf(player.getUUID());
+        if (nation.isEmpty()) {
+            NationCommands.fail(player, "You are not in a nation.");
+            return 0;
+        }
+        Optional<NationStore.Alliance> alliance = NationStore.get().allianceOf(nation.get());
+        if (alliance.isEmpty()) {
+            NationCommands.fail(player, "Your nation is not in an alliance.");
+            return 0;
+        }
+        return NationCommands.describeAlliance((CommandSourceStack)context.getSource(), alliance.get());
+    }
+
+    private static int allianceInfoNamed(CommandContext<CommandSourceStack> context) {
+        Optional<NationStore.Alliance> alliance = NationStore.get().allianceByName(StringArgumentType.getString(context, (String)"name"));
+        if (alliance.isEmpty()) {
+            ((CommandSourceStack)context.getSource()).sendFailure((Component)Component.literal((String)"No alliance with that name exists."));
+            return 0;
+        }
+        return NationCommands.describeAlliance((CommandSourceStack)context.getSource(), alliance.get());
+    }
+
+    private static int alliances(CommandContext<CommandSourceStack> context) {
+        NationStore store = NationStore.get();
+        if (store.alliances().isEmpty()) {
+            ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)"No alliances exist yet."), false);
             return 1;
-         }
-      } else {
-         fail(player, "Only a nation owner can create an alliance.");
-         return 0;
-      }
-   }
+        }
+        for (NationStore.Alliance alliance : store.alliances()) {
+            ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)(alliance.name + " | members: " + alliance.members.size())), false);
+        }
+        return 1;
+    }
 
-   private static int allianceInvite(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> inviter = store.nationOf(player.getUUID());
-      Optional<NationStore.Nation> invited = store.nationByName(StringArgumentType.getString(context, "country"));
-      if (!inviter.isEmpty() && !invited.isEmpty()) {
-         Optional<NationStore.Alliance> alliance = store.allianceOf(inviter.get());
-         if (alliance.isEmpty()) {
-            fail(player, "Your nation is not in an alliance.");
+    private static int describeAlliance(CommandSourceStack source, NationStore.Alliance alliance) {
+        NationStore store = NationStore.get();
+        String members = alliance.members.stream().map(id -> store.nationById((String)id).map(nation -> nation.name).orElse((String)id)).sorted().collect(Collectors.joining(", "));
+        source.sendSuccess(() -> Component.literal((String)("Alliance: " + alliance.name)), false);
+        source.sendSuccess(() -> Component.literal((String)("Leader: " + store.nationById(alliance.leader).map(nation -> nation.name).orElse(alliance.leader))), false);
+        source.sendSuccess(() -> Component.literal((String)("Members: " + members)), false);
+        return 1;
+    }
+
+    private static int justifyWar(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> attacker = store.nationOf(player.getUUID());
+        Optional<NationStore.Nation> defender = store.nationByName(StringArgumentType.getString(context, (String)"country"));
+        if (attacker.isEmpty() || defender.isEmpty() || attacker.get().id.equals(defender.get().id)) {
+            NationCommands.fail(player, "Pick another existing nation.");
             return 0;
-         } else if (!store.inviteToAlliance(alliance.get(), inviter.get(), invited.get())) {
-            fail(player, "Could not invite that nation.");
+        }
+        if (attacker.get().doctrine().pacifist) {
+            NationCommands.fail(player, attacker.get().doctrine().displayName + " cannot justify wars. Join ongoing conflicts instead.");
             return 0;
-         } else {
-            store.notifyNation(
-               player.getServer(),
-               invited.get(),
-               Component.literal(
-                  "[NationWars] "
-                     + inviter.get().name
-                     + " invited you to alliance "
-                     + alliance.get().name
-                     + ". Use /alliance accept "
-                     + alliance.get().id
-                     + "."
-               )
-            );
-            ok(player, "Alliance invite sent to " + invited.get().name + ".");
-            return 1;
-         }
-      } else {
-         fail(player, "Both sides must be nations.");
-         return 0;
-      }
-   }
-
-   private static int allianceAccept(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
-      Optional<NationStore.Alliance> alliance = store.allianceByName(StringArgumentType.getString(context, "name"));
-      if (!nation.isEmpty() && !alliance.isEmpty()) {
-         if (!store.isOwner(player.getUUID(), nation.get())) {
-            fail(player, "Only the nation owner can accept alliance invites.");
-            return 0;
-         } else if (!store.acceptAllianceInvite(alliance.get(), nation.get())) {
-            fail(player, "No invite from that alliance.");
-            return 0;
-         } else {
-            store.notifyNation(player.getServer(), nation.get(), Component.literal("[NationWars] Joined alliance " + alliance.get().name + "."));
-            return 1;
-         }
-      } else {
-         fail(player, "No matching nation or alliance.");
-         return 0;
-      }
-   }
-
-   private static int allianceKick(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> actor = store.nationOf(player.getUUID());
-      Optional<NationStore.Nation> kicked = store.nationByName(StringArgumentType.getString(context, "country"));
-      if (!actor.isEmpty() && !kicked.isEmpty()) {
-         Optional<NationStore.Alliance> alliance = store.allianceOf(actor.get());
-         if (!alliance.isEmpty() && store.kickFromAlliance(alliance.get(), actor.get(), kicked.get())) {
-            store.notifyNation(player.getServer(), kicked.get(), Component.literal("[NationWars] You were kicked from alliance " + alliance.get().name + "."));
-            ok(player, "Kicked " + kicked.get().name + " from " + alliance.get().name + ".");
-            return 1;
-         } else {
-            fail(player, "Only the alliance leader can kick member nations.");
-            return 0;
-         }
-      } else {
-         fail(player, "Both sides must be nations.");
-         return 0;
-      }
-   }
-
-   private static int allianceInfo(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      Optional<NationStore.Nation> nation = NationStore.get().nationOf(player.getUUID());
-      if (nation.isEmpty()) {
-         fail(player, "You are not in a nation.");
-         return 0;
-      } else {
-         Optional<NationStore.Alliance> alliance = NationStore.get().allianceOf(nation.get());
-         if (alliance.isEmpty()) {
-            fail(player, "Your nation is not in an alliance.");
-            return 0;
-         } else {
-            return describeAlliance((CommandSourceStack)context.getSource(), alliance.get());
-         }
-      }
-   }
-
-   private static int allianceInfoNamed(CommandContext<CommandSourceStack> context) {
-      Optional<NationStore.Alliance> alliance = NationStore.get().allianceByName(StringArgumentType.getString(context, "name"));
-      if (alliance.isEmpty()) {
-         ((CommandSourceStack)context.getSource()).sendFailure(Component.literal("No alliance with that name exists."));
-         return 0;
-      } else {
-         return describeAlliance((CommandSourceStack)context.getSource(), alliance.get());
-      }
-   }
-
-   private static int alliances(CommandContext<CommandSourceStack> context) {
-      NationStore store = NationStore.get();
-      if (store.alliances().isEmpty()) {
-         ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("No alliances exist yet."), false);
-         return 1;
-      } else {
-         for (NationStore.Alliance alliance : store.alliances()) {
-            ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal(alliance.name + " | members: " + alliance.members.size()), false);
-         }
-
-         return 1;
-      }
-   }
-
-   private static int describeAlliance(CommandSourceStack source, NationStore.Alliance alliance) {
-      NationStore store = NationStore.get();
-      String members = alliance.members
-         .stream()
-         .map(id -> store.nationById(id).map(nation -> nation.name).orElse(id))
-         .sorted()
-         .collect(Collectors.joining(", "));
-      source.sendSuccess(() -> Component.literal("Alliance: " + alliance.name), false);
-      source.sendSuccess(() -> Component.literal("Leader: " + store.nationById(alliance.leader).map(nation -> nation.name).orElse(alliance.leader)), false);
-      source.sendSuccess(() -> Component.literal("Members: " + members), false);
-      return 1;
-   }
-
-   private static int justifyWar(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> attacker = store.nationOf(player.getUUID());
-      Optional<NationStore.Nation> defender = store.nationByName(StringArgumentType.getString(context, "country"));
-      if (attacker.isEmpty() || defender.isEmpty() || attacker.get().id.equals(defender.get().id)) {
-         fail(player, "Pick another existing nation.");
-         return 0;
-      } else if (attacker.get().doctrine().pacifist) {
-         fail(player, attacker.get().doctrine().displayName + " cannot justify wars. Join ongoing conflicts instead.");
-         return 0;
-      } else {
-         Optional<NationStore.War> existing = store.warBetween(attacker.get(), defender.get());
-         if (existing.isPresent()) {
+        }
+        Optional<NationStore.War> existing = store.warBetween(attacker.get(), defender.get());
+        if (existing.isPresent()) {
             NationStore.War existingWar = existing.get();
             if (existingWar.active) {
-               fail(player, "That war is already active.");
-               return 0;
-            } else if (existingWar.pendingDefenderResponse) {
-               fail(player, "That war declaration is already waiting for a response.");
-               return 0;
-            } else {
-               if (attacker.get().id.equals(existingWar.attacker)) {
-                  fail(player, "You are already justifying this war. Use /war declare " + defender.get().id + " when it is ready.");
-               } else {
-                  fail(player, defender.get().name + " is already justifying a war against you.");
-               }
-
-               return 0;
+                NationCommands.fail(player, "That war is already active.");
+                return 0;
             }
-         } else {
-            NationStore.War war = store.getOrCreateWar(attacker.get(), defender.get());
-            war.attacker = attacker.get().id;
-            war.defender = defender.get().id;
+            if (existingWar.pendingDefenderResponse) {
+                NationCommands.fail(player, "That war declaration is already waiting for a response.");
+                return 0;
+            }
+            if (attacker.get().id.equals(existingWar.attacker)) {
+                NationCommands.fail(player, "You are already justifying this war. Use /war declare " + defender.get().id + " when it is ready.");
+            } else {
+                NationCommands.fail(player, defender.get().name + " is already justifying a war against you.");
+            }
+            return 0;
+        }
+        NationStore.War war = store.getOrCreateWar(attacker.get(), defender.get());
+        war.attacker = attacker.get().id;
+        war.defender = defender.get().id;
+        war.active = false;
+        war.pendingDefenderResponse = false;
+        war.attackerCapturedClaims.clear();
+        war.capturedClaimsByNation.clear();
+        war.peaceOffers.clear();
+        war.attackerSide.clear();
+        war.defenderSide.clear();
+        war.attackerSide.add(attacker.get().id);
+        war.defenderSide.add(defender.get().id);
+        war.defenderStartingClaims = 0;
+        int seconds = NationCommands.warJustificationSeconds(attacker.get(), defender.get());
+        war.justificationCompleteTick = (long)player.getServer().getTickCount() + (long)seconds * 20L;
+        store.save();
+        store.notifyNation(player.getServer(), defender.get(), (Component)Component.literal((String)(attacker.get().name + " is justifying a war against you.")));
+        NationCommands.ok(player, "War justification started. Ready in " + seconds + " seconds.");
+        return 1;
+    }
+
+    private static int declareWar(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> attacker = store.nationOf(player.getUUID());
+        Optional<NationStore.Nation> defender = store.nationByName(StringArgumentType.getString(context, (String)"country"));
+        if (attacker.isEmpty() || defender.isEmpty()) {
+            NationCommands.fail(player, "Pick an existing target nation.");
+            return 0;
+        }
+        Optional<NationStore.War> maybeWar = store.warBetween(attacker.get(), defender.get());
+        if (maybeWar.isEmpty() || !maybeWar.get().attacker.equals(attacker.get().id)) {
+            NationCommands.fail(player, "You need to justify this war first.");
+            return 0;
+        }
+        NationStore.War war = maybeWar.get();
+        if (war.active) {
+            NationCommands.fail(player, "That war is already active.");
+            return 0;
+        }
+        if (war.pendingDefenderResponse) {
+            NationCommands.fail(player, "That war declaration is already waiting for a response.");
+            return 0;
+        }
+        MinecraftServer server = player.getServer();
+        if ((long)server.getTickCount() < war.justificationCompleteTick) {
+            long secondsLeft = Math.max(1L, (war.justificationCompleteTick - (long)server.getTickCount()) / 20L);
+            NationCommands.fail(player, "Justification is not ready. " + secondsLeft + " seconds left.");
+            return 0;
+        }
+        if (NationCommands.canDefenderRejectWar(store, attacker.get(), defender.get())) {
+            war.pendingDefenderResponse = true;
             war.active = false;
-            war.pendingDefenderResponse = false;
-            war.attackerCapturedClaims.clear();
-            war.capturedClaimsByNation.clear();
-            war.peaceOffers.clear();
-            war.attackerSide.clear();
-            war.defenderSide.clear();
-            war.attackerSide.add(attacker.get().id);
-            war.defenderSide.add(defender.get().id);
-            war.defenderStartingClaims = 0;
-            int seconds = warJustificationSeconds(attacker.get(), defender.get());
-            war.justificationCompleteTick = (long)player.getServer().getTickCount() + (long)seconds * 20L;
             store.save();
-            store.notifyNation(player.getServer(), defender.get(), Component.literal(attacker.get().name + " is justifying a war against you."));
-            ok(player, "War justification started. Ready in " + seconds + " seconds.");
+            store.notifyNation(server, defender.get(), (Component)Component.literal((String)("[NationWars] " + attacker.get().name + " declared war. Your bigger territory lets you reject it. Use /war accept " + attacker.get().id + " or /war reject " + attacker.get().id + ".")));
+            store.notifyNation(server, attacker.get(), (Component)Component.literal((String)("[NationWars] War declaration sent to " + defender.get().name + " for response.")));
             return 1;
-         }
-      }
-   }
+        }
+        war.active = true;
+        war.pendingDefenderResponse = false;
+        war.defenderStartingClaims = store.claimCount(defender.get());
+        store.save();
+        NationCommands.createAllianceDefenseCalls(server, store, war, defender.get());
+        store.notifyNation(server, defender.get(), (Component)Component.literal((String)(attacker.get().name + " declared war on you.")));
+        store.notifyNation(server, attacker.get(), (Component)Component.literal((String)("War declared on " + defender.get().name + ".")));
+        return 1;
+    }
 
-   private static int declareWar(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> attacker = store.nationOf(player.getUUID());
-      Optional<NationStore.Nation> defender = store.nationByName(StringArgumentType.getString(context, "country"));
-      if (!attacker.isEmpty() && !defender.isEmpty()) {
-         Optional<NationStore.War> maybeWar = store.warBetween(attacker.get(), defender.get());
-         if (!maybeWar.isEmpty() && maybeWar.get().attacker.equals(attacker.get().id)) {
-            NationStore.War war = maybeWar.get();
-            if (war.active) {
-               fail(player, "That war is already active.");
-               return 0;
-            } else if (war.pendingDefenderResponse) {
-               fail(player, "That war declaration is already waiting for a response.");
-               return 0;
-            } else {
-               MinecraftServer server = player.getServer();
-               if ((long)server.getTickCount() < war.justificationCompleteTick) {
-                  long secondsLeft = Math.max(1L, (war.justificationCompleteTick - (long)server.getTickCount()) / 20L);
-                  fail(player, "Justification is not ready. " + secondsLeft + " seconds left.");
-                  return 0;
-               } else if (canDefenderRejectWar(store, attacker.get(), defender.get())) {
-                  war.pendingDefenderResponse = true;
-                  war.active = false;
-                  store.save();
-                  store.notifyNation(
-                     server,
-                     defender.get(),
-                     Component.literal(
-                        "[NationWars] "
-                           + attacker.get().name
-                           + " declared war. Your bigger territory lets you reject it. Use /war accept "
-                           + attacker.get().id
-                           + " or /war reject "
-                           + attacker.get().id
-                           + "."
-                     )
-                  );
-                  store.notifyNation(
-                     server, attacker.get(), Component.literal("[NationWars] War declaration sent to " + defender.get().name + " for response.")
-                  );
-                  return 1;
-               } else {
-                  war.active = true;
-                  war.pendingDefenderResponse = false;
-                  war.defenderStartingClaims = store.claimCount(defender.get());
-                  store.save();
-                  createAllianceDefenseCalls(server, store, war, defender.get());
-                  store.notifyNation(server, defender.get(), Component.literal(attacker.get().name + " declared war on you."));
-                  store.notifyNation(server, attacker.get(), Component.literal("War declared on " + defender.get().name + "."));
-                  return 1;
-               }
-            }
-         } else {
-            fail(player, "You need to justify this war first.");
+    private static int acceptWarDeclaration(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> defender = store.nationOf(player.getUUID());
+        Optional<NationStore.Nation> attacker = store.nationByName(StringArgumentType.getString(context, (String)"country"));
+        if (defender.isEmpty() || attacker.isEmpty()) {
+            NationCommands.fail(player, "Both sides must be nations.");
             return 0;
-         }
-      } else {
-         fail(player, "Pick an existing target nation.");
-         return 0;
-      }
-   }
+        }
+        Optional<NationStore.War> maybeWar = store.warBetween(attacker.get(), defender.get());
+        if (maybeWar.isEmpty() || !maybeWar.get().pendingDefenderResponse || !maybeWar.get().defender.equals(defender.get().id)) {
+            NationCommands.fail(player, "There is no pending war declaration from that nation.");
+            return 0;
+        }
+        NationStore.War war = maybeWar.get();
+        war.active = true;
+        war.pendingDefenderResponse = false;
+        war.defenderStartingClaims = store.claimCount(defender.get());
+        store.save();
+        NationCommands.createAllianceDefenseCalls(player.getServer(), store, war, defender.get());
+        store.notifyNation(player.getServer(), attacker.get(), (Component)Component.literal((String)("[NationWars] " + defender.get().name + " accepted the war declaration.")));
+        store.notifyNation(player.getServer(), defender.get(), (Component)Component.literal((String)("[NationWars] War accepted against " + attacker.get().name + ".")));
+        return 1;
+    }
 
-   private static int acceptWarDeclaration(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> defender = store.nationOf(player.getUUID());
-      Optional<NationStore.Nation> attacker = store.nationByName(StringArgumentType.getString(context, "country"));
-      if (!defender.isEmpty() && !attacker.isEmpty()) {
-         Optional<NationStore.War> maybeWar = store.warBetween(attacker.get(), defender.get());
-         if (!maybeWar.isEmpty() && maybeWar.get().pendingDefenderResponse && maybeWar.get().defender.equals(defender.get().id)) {
-            NationStore.War war = maybeWar.get();
-            war.active = true;
-            war.pendingDefenderResponse = false;
-            war.defenderStartingClaims = store.claimCount(defender.get());
-            store.save();
-            createAllianceDefenseCalls(player.getServer(), store, war, defender.get());
-            store.notifyNation(player.getServer(), attacker.get(), Component.literal("[NationWars] " + defender.get().name + " accepted the war declaration."));
-            store.notifyNation(player.getServer(), defender.get(), Component.literal("[NationWars] War accepted against " + attacker.get().name + "."));
+    private static int rejectWarDeclaration(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> defender = store.nationOf(player.getUUID());
+        Optional<NationStore.Nation> attacker = store.nationByName(StringArgumentType.getString(context, (String)"country"));
+        if (defender.isEmpty() || attacker.isEmpty()) {
+            NationCommands.fail(player, "Both sides must be nations.");
+            return 0;
+        }
+        Optional<NationStore.War> maybeWar = store.warBetween(attacker.get(), defender.get());
+        if (maybeWar.isEmpty() || !maybeWar.get().pendingDefenderResponse || !maybeWar.get().defender.equals(defender.get().id)) {
+            NationCommands.fail(player, "There is no pending war declaration from that nation.");
+            return 0;
+        }
+        if (attacker.get().doctrine().canRejectWarDeclarations) {
+            store.recordWarDeclarationRejection(attacker.get(), defender.get());
+        }
+        store.endWar(maybeWar.get());
+        store.notifyNation(player.getServer(), attacker.get(), (Component)Component.literal((String)("[NationWars] " + defender.get().name + " rejected the war declaration.")));
+        store.notifyNation(player.getServer(), defender.get(), (Component)Component.literal((String)"[NationWars] War declaration rejected."));
+        return 1;
+    }
+
+    private static int requestWarJoin(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> requester = store.nationOf(player.getUUID());
+        Optional<NationStore.Nation> sponsor = store.nationByName(StringArgumentType.getString(context, (String)"country"));
+        if (requester.isEmpty() || sponsor.isEmpty() || requester.get().id.equals(sponsor.get().id)) {
+            NationCommands.fail(player, "Pick another nation in an active war.");
+            return 0;
+        }
+        Optional<NationStore.War> maybeWar = store.firstActiveWarOf(sponsor.get());
+        if (maybeWar.isEmpty()) {
+            NationCommands.fail(player, sponsor.get().name + " is not in an active war.");
+            return 0;
+        }
+        if (!store.addWarJoinRequest(maybeWar.get(), requester.get(), sponsor.get())) {
+            NationCommands.fail(player, "Could not request to join that war.");
+            return 0;
+        }
+        store.notifyNation(player.getServer(), sponsor.get(), (Component)Component.literal((String)("[NationWars] " + requester.get().name + " wants to join your war. Use /war acceptjoin " + requester.get().id + " or /war rejectjoin " + requester.get().id + ".")));
+        NationCommands.ok(player, "War join request sent to " + sponsor.get().name + ".");
+        return 1;
+    }
+
+    private static int acceptWarJoin(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> acceptor = store.nationOf(player.getUUID());
+        Optional<NationStore.Nation> requester = store.nationByName(StringArgumentType.getString(context, (String)"country"));
+        if (acceptor.isEmpty() || requester.isEmpty()) {
+            NationCommands.fail(player, "Both sides must be nations.");
+            return 0;
+        }
+        for (NationStore.War war : store.activeWarsOf(acceptor.get())) {
+            if (!store.acceptWarJoinRequest(war, requester.get(), acceptor.get())) continue;
+            store.notifyNation(player.getServer(), requester.get(), (Component)Component.literal((String)("[NationWars] " + acceptor.get().name + " accepted your war join request.")));
+            store.notifyNation(player.getServer(), acceptor.get(), (Component)Component.literal((String)("[NationWars] " + requester.get().name + " joined your war.")));
             return 1;
-         } else {
-            fail(player, "There is no pending war declaration from that nation.");
+        }
+        NationCommands.fail(player, "No pending join request from that nation.");
+        return 0;
+    }
+
+    private static int acceptAllianceDefense(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> ally = store.nationOf(player.getUUID());
+        Optional<NationStore.Nation> caller = store.nationByName(StringArgumentType.getString(context, (String)"country"));
+        if (ally.isEmpty() || caller.isEmpty()) {
+            NationCommands.fail(player, "Both sides must be nations.");
             return 0;
-         }
-      } else {
-         fail(player, "Both sides must be nations.");
-         return 0;
-      }
-   }
-
-   private static int rejectWarDeclaration(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> defender = store.nationOf(player.getUUID());
-      Optional<NationStore.Nation> attacker = store.nationByName(StringArgumentType.getString(context, "country"));
-      if (!defender.isEmpty() && !attacker.isEmpty()) {
-         Optional<NationStore.War> maybeWar = store.warBetween(attacker.get(), defender.get());
-         if (!maybeWar.isEmpty() && maybeWar.get().pendingDefenderResponse && maybeWar.get().defender.equals(defender.get().id)) {
-            if (attacker.get().doctrine().canRejectWarDeclarations) {
-               store.recordWarDeclarationRejection(attacker.get(), defender.get());
-            }
-
-            store.endWar(maybeWar.get());
-            store.notifyNation(player.getServer(), attacker.get(), Component.literal("[NationWars] " + defender.get().name + " rejected the war declaration."));
-            store.notifyNation(player.getServer(), defender.get(), Component.literal("[NationWars] War declaration rejected."));
+        }
+        for (NationStore.War war : store.activeWarsOf(caller.get())) {
+            if (!store.acceptWarDefenseCall(war, ally.get(), caller.get())) continue;
+            store.notifyNation(player.getServer(), caller.get(), (Component)Component.literal((String)("[NationWars] " + ally.get().name + " answered the alliance defense call.")));
+            store.notifyNation(player.getServer(), ally.get(), (Component)Component.literal((String)("[NationWars] Joined the war to defend " + caller.get().name + ".")));
             return 1;
-         } else {
-            fail(player, "There is no pending war declaration from that nation.");
-            return 0;
-         }
-      } else {
-         fail(player, "Both sides must be nations.");
-         return 0;
-      }
-   }
+        }
+        NationCommands.fail(player, "No pending alliance defense call from that nation.");
+        return 0;
+    }
 
-   private static int requestWarJoin(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> requester = store.nationOf(player.getUUID());
-      Optional<NationStore.Nation> sponsor = store.nationByName(StringArgumentType.getString(context, "country"));
-      if (!requester.isEmpty() && !sponsor.isEmpty() && !requester.get().id.equals(sponsor.get().id)) {
-         Optional<NationStore.War> maybeWar = store.firstActiveWarOf(sponsor.get());
-         if (maybeWar.isEmpty()) {
-            fail(player, sponsor.get().name + " is not in an active war.");
+    private static int declineAllianceDefense(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> ally = store.nationOf(player.getUUID());
+        Optional<NationStore.Nation> caller = store.nationByName(StringArgumentType.getString(context, (String)"country"));
+        if (ally.isEmpty() || caller.isEmpty()) {
+            NationCommands.fail(player, "Both sides must be nations.");
             return 0;
-         } else if (!store.addWarJoinRequest(maybeWar.get(), requester.get(), sponsor.get())) {
-            fail(player, "Could not request to join that war.");
-            return 0;
-         } else {
-            store.notifyNation(
-               player.getServer(),
-               sponsor.get(),
-               Component.literal(
-                  "[NationWars] "
-                     + requester.get().name
-                     + " wants to join your war. Use /war acceptjoin "
-                     + requester.get().id
-                     + " or /war rejectjoin "
-                     + requester.get().id
-                     + "."
-               )
-            );
-            ok(player, "War join request sent to " + sponsor.get().name + ".");
+        }
+        for (NationStore.War war : store.activeWarsOf(caller.get())) {
+            if (!store.rejectWarDefenseCall(war, ally.get(), caller.get())) continue;
+            if (ally.get().doctrine() == Doctrine.FRENCH && caller.get().doctrine().ideology == Ideology.DEMOCRATIC) {
+                double penalty = Math.min(ally.get().balance, 300.0);
+                ally.get().balance = NationStore.roundMoney(ally.get().balance - penalty);
+                store.save();
+                store.notifyNation(player.getServer(), ally.get(), (Component)Component.literal((String)("[NationWars] Casus Foederis penalty: $" + NationStore.roundMoney(penalty) + " lost for declining to defend " + caller.get().name + ".")));
+            } else {
+                NationCommands.ok(player, "Declined the alliance defense call from " + caller.get().name + ".");
+            }
+            store.notifyNation(player.getServer(), caller.get(), (Component)Component.literal((String)("[NationWars] " + ally.get().name + " declined your alliance defense call.")));
             return 1;
-         }
-      } else {
-         fail(player, "Pick another nation in an active war.");
-         return 0;
-      }
-   }
+        }
+        NationCommands.fail(player, "No pending alliance defense call from that nation.");
+        return 0;
+    }
 
-   private static int acceptWarJoin(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> acceptor = store.nationOf(player.getUUID());
-      Optional<NationStore.Nation> requester = store.nationByName(StringArgumentType.getString(context, "country"));
-      if (!acceptor.isEmpty() && !requester.isEmpty()) {
-         for (NationStore.War war : store.activeWarsOf(acceptor.get())) {
-            if (store.acceptWarJoinRequest(war, requester.get(), acceptor.get())) {
-               store.notifyNation(
-                  player.getServer(), requester.get(), Component.literal("[NationWars] " + acceptor.get().name + " accepted your war join request.")
-               );
-               store.notifyNation(player.getServer(), acceptor.get(), Component.literal("[NationWars] " + requester.get().name + " joined your war."));
-               return 1;
-            }
-         }
-
-         fail(player, "No pending join request from that nation.");
-         return 0;
-      } else {
-         fail(player, "Both sides must be nations.");
-         return 0;
-      }
-   }
-
-   private static int acceptAllianceDefense(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> ally = store.nationOf(player.getUUID());
-      Optional<NationStore.Nation> caller = store.nationByName(StringArgumentType.getString(context, "country"));
-      if (!ally.isEmpty() && !caller.isEmpty()) {
-         for (NationStore.War war : store.activeWarsOf(caller.get())) {
-            if (store.acceptWarDefenseCall(war, ally.get(), caller.get())) {
-               store.notifyNation(
-                  player.getServer(), caller.get(), Component.literal("[NationWars] " + ally.get().name + " answered the alliance defense call.")
-               );
-               store.notifyNation(player.getServer(), ally.get(), Component.literal("[NationWars] Joined the war to defend " + caller.get().name + "."));
-               return 1;
-            }
-         }
-
-         fail(player, "No pending alliance defense call from that nation.");
-         return 0;
-      } else {
-         fail(player, "Both sides must be nations.");
-         return 0;
-      }
-   }
-
-   private static int declineAllianceDefense(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> ally = store.nationOf(player.getUUID());
-      Optional<NationStore.Nation> caller = store.nationByName(StringArgumentType.getString(context, "country"));
-      if (!ally.isEmpty() && !caller.isEmpty()) {
-         for (NationStore.War war : store.activeWarsOf(caller.get())) {
-            if (store.rejectWarDefenseCall(war, ally.get(), caller.get())) {
-               if (ally.get().doctrine() == Doctrine.FRENCH && caller.get().doctrine().ideology == Ideology.DEMOCRATIC) {
-                  double penalty = Math.min(ally.get().balance, 300.0);
-                  ally.get().balance = NationStore.roundMoney(ally.get().balance - penalty);
-                  store.save();
-                  store.notifyNation(
-                     player.getServer(),
-                     ally.get(),
-                     Component.literal(
-                        "[NationWars] Casus Foederis penalty: $" + NationStore.roundMoney(penalty) + " lost for declining to defend " + caller.get().name + "."
-                     )
-                  );
-               } else {
-                  ok(player, "Declined the alliance defense call from " + caller.get().name + ".");
-               }
-
-               store.notifyNation(
-                  player.getServer(), caller.get(), Component.literal("[NationWars] " + ally.get().name + " declined your alliance defense call.")
-               );
-               return 1;
-            }
-         }
-
-         fail(player, "No pending alliance defense call from that nation.");
-         return 0;
-      } else {
-         fail(player, "Both sides must be nations.");
-         return 0;
-      }
-   }
-
-   private static int rejectWarJoin(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> rejector = store.nationOf(player.getUUID());
-      Optional<NationStore.Nation> requester = store.nationByName(StringArgumentType.getString(context, "country"));
-      if (!rejector.isEmpty() && !requester.isEmpty()) {
-         for (NationStore.War war : store.activeWarsOf(rejector.get())) {
-            if (store.rejectWarJoinRequest(war, requester.get(), rejector.get())) {
-               store.notifyNation(
-                  player.getServer(), requester.get(), Component.literal("[NationWars] " + rejector.get().name + " rejected your war join request.")
-               );
-               ok(player, "Rejected war join request from " + requester.get().name + ".");
-               return 1;
-            }
-         }
-
-         fail(player, "No pending join request from that nation.");
-         return 0;
-      } else {
-         fail(player, "Both sides must be nations.");
-         return 0;
-      }
-   }
-
-   private static int leaveWar(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> own = store.nationOf(player.getUUID());
-      Optional<NationStore.Nation> other = store.nationByName(StringArgumentType.getString(context, "country"));
-      if (own.isEmpty() || other.isEmpty()) {
-         fail(player, "Both sides must be nations.");
-         return 0;
-      } else if (!own.get().doctrine().canLeaveWarSafely) {
-         fail(player, "Only Romania can leave a war this way.");
-         return 0;
-      } else {
-         String ideologyKey = other.get().doctrine().ideology.name();
-         if (own.get().usedSpecialWarLeaveIdeologies.contains(ideologyKey)) {
-            fail(player, "King Michael's Coup was already used against a " + other.get().doctrine().ideology.displayName + " enemy.");
+    private static int rejectWarJoin(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> rejector = store.nationOf(player.getUUID());
+        Optional<NationStore.Nation> requester = store.nationByName(StringArgumentType.getString(context, (String)"country"));
+        if (rejector.isEmpty() || requester.isEmpty()) {
+            NationCommands.fail(player, "Both sides must be nations.");
             return 0;
-         } else if (own.get().usedSpecialWarLeaveIdeologies.size() >= Ideology.values().length) {
-            fail(player, "King Michael's Coup has already been used against every ideology.");
+        }
+        for (NationStore.War war : store.activeWarsOf(rejector.get())) {
+            if (!store.rejectWarJoinRequest(war, requester.get(), rejector.get())) continue;
+            store.notifyNation(player.getServer(), requester.get(), (Component)Component.literal((String)("[NationWars] " + rejector.get().name + " rejected your war join request.")));
+            NationCommands.ok(player, "Rejected war join request from " + requester.get().name + ".");
+            return 1;
+        }
+        NationCommands.fail(player, "No pending join request from that nation.");
+        return 0;
+    }
+
+    private static int leaveWar(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> own = store.nationOf(player.getUUID());
+        Optional<NationStore.Nation> other = store.nationByName(StringArgumentType.getString(context, (String)"country"));
+        if (own.isEmpty() || other.isEmpty()) {
+            NationCommands.fail(player, "Both sides must be nations.");
             return 0;
-         } else {
-            Optional<NationStore.War> maybeWar = store.activeWarForCapture(own.get(), other.get()).or(() -> store.activeWarForCapture(other.get(), own.get()));
-            if (maybeWar.isEmpty()) {
-               fail(player, "There is no active war with that nation.");
-               return 0;
-            } else {
-               own.get().usedSpecialWarLeaveIdeologies.add(ideologyKey);
-               store.leaveWarSafely(maybeWar.get(), own.get());
-               store.save();
-               String carolMessage = own.get().usedSpecialWarLeaveIdeologies.size() >= Ideology.values().length ? " Carol II Lifestyle is now removed." : "";
-               store.notifyNation(player.getServer(), own.get(), Component.literal("[NationWars] Left the war with no consequences." + carolMessage));
-               store.notifyNation(
-                  player.getServer(), other.get(), Component.literal("[NationWars] " + own.get().name + " left the war through King Michael's Coup.")
-               );
-               return 1;
-            }
-         }
-      }
-   }
-
-   private static int warOverview(CommandContext<CommandSourceStack> context) {
-      ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("War commands:"), false);
-      ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("/war status"), false);
-      ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("/war justify <nation> | /war declare <nation>"), false);
-      ((CommandSourceStack)context.getSource())
-         .sendSuccess(() -> Component.literal("/war join <nation> | /war acceptjoin <nation> | /war rejectjoin <nation>"), false);
-      ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("/war defend <nation> | /war declinedefense <nation>"), false);
-      ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("/peace <nation> | /surrender <nation>"), false);
-      return 1;
-   }
-
-   private static int warStatus(CommandContext<CommandSourceStack> context) {
-      NationStore store = NationStore.get();
-      List<NationStore.War> wars = store.wars().stream().sorted(Comparator.comparing(warx -> warx.id)).toList();
-      if (wars.isEmpty()) {
-         ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("No wars or justifications."), false);
-         return 1;
-      } else {
-         MinecraftServer server = ((CommandSourceStack)context.getSource()).getServer();
-
-         for (NationStore.War war : wars) {
-            String attacker = store.nationById(war.attacker).map(nation -> nation.name).orElse(war.attacker);
-            String defender = store.nationById(war.defender).map(nation -> nation.name).orElse(war.defender);
-            ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal(attacker + " vs " + defender), false);
-            if (war.active) {
-               ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("  active"), false);
-               ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("  attackers: " + nationNames(store, war.attackerSide)), false);
-               ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("  defenders: " + nationNames(store, war.defenderSide)), false);
-               if (!war.joinRequests.isEmpty()) {
-                  ((CommandSourceStack)context.getSource())
-                     .sendSuccess(() -> Component.literal("  pending: " + nationNames(store, war.joinRequests.keySet())), false);
-               }
-            } else if (war.pendingDefenderResponse) {
-               ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("  waiting for defender response"), false);
-            } else {
-               long secondsLeft = Math.max(0L, (war.justificationCompleteTick - (long)server.getTickCount()) / 20L);
-               ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal("  justifying: " + secondsLeft + "s left"), false);
-            }
-         }
-
-         return 1;
-      }
-   }
-
-   private static void createAllianceDefenseCalls(MinecraftServer server, NationStore store, NationStore.War war, NationStore.Nation defender) {
-      if (defender.doctrine().ideology == Ideology.DEMOCRATIC) {
-         store.allianceOf(defender)
-            .ifPresent(
-               alliance -> {
-                  for (String allyId : alliance.members) {
-                     if (!allyId.equals(defender.id)) {
-                        NationStore.Nation ally = store.nationById(allyId).orElse(null);
-                        if (ally != null && !store.isWarParticipant(war, ally) && store.addWarDefenseCall(war, ally, defender)) {
-                           store.notifyNation(
-                              server,
-                              ally,
-                              Component.literal(
-                                 "[NationWars] Democratic ally "
-                                    + defender.name
-                                    + " called for defense. Use /war defend "
-                                    + defender.id
-                                    + " or /war declinedefense "
-                                    + defender.id
-                                    + "."
-                              )
-                           );
-                        }
-                     }
-                  }
-               }
-            );
-      }
-   }
-
-   private static int peace(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> own = store.nationOf(player.getUUID());
-      Optional<NationStore.Nation> other = store.nationByName(StringArgumentType.getString(context, "country"));
-      if (!own.isEmpty() && !other.isEmpty()) {
-         Optional<NationStore.War> maybeWar = store.activeWarForCapture(own.get(), other.get()).or(() -> store.activeWarForCapture(other.get(), own.get()));
-         if (maybeWar.isEmpty()) {
-            fail(player, "There is no active war with that nation.");
+        }
+        if (!own.get().doctrine().canLeaveWarSafely) {
+            NationCommands.fail(player, "Only Romania can leave a war this way.");
             return 0;
-         } else {
-            NationStore.War war = maybeWar.get();
-            if ((war.peaceDeal == null || !own.get().id.equals(war.peaceDeal.receiver))
-               && store.peaceCooldownUntil(own.get(), other.get()) > (long)player.getServer().getTickCount()) {
-               long secondsLeft = Math.max(1L, (store.peaceCooldownUntil(own.get(), other.get()) - (long)player.getServer().getTickCount()) / 20L);
-               fail(player, "Your last peace offer was rejected. Try again in " + secondsLeft + " seconds.");
-               return 0;
-            } else {
-               player.openMenu(
-                  new SimpleMenuProvider(
-                     (containerId, inventory, viewer) -> new PeaceDealMenu(containerId, inventory, own.get(), other.get(), war),
-                     Component.literal("Offer Peace Deal")
-                  )
-               );
-               return 1;
-            }
-         }
-      } else {
-         fail(player, "Both sides must be nations.");
-         return 0;
-      }
-   }
-
-   private static int rejectPeace(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> own = store.nationOf(player.getUUID());
-      Optional<NationStore.Nation> other = store.nationByName(StringArgumentType.getString(context, "country"));
-      if (!own.isEmpty() && !other.isEmpty()) {
-         Optional<NationStore.War> maybeWar = store.activeWarForCapture(own.get(), other.get()).or(() -> store.activeWarForCapture(other.get(), own.get()));
-         if (maybeWar.isEmpty()) {
-            fail(player, "There is no active war with that nation.");
+        }
+        String ideologyKey = other.get().doctrine().ideology.name();
+        if (own.get().usedSpecialWarLeaveIdeologies.contains(ideologyKey)) {
+            NationCommands.fail(player, "King Michael's Coup was already used against a " + other.get().doctrine().ideology.displayName + " enemy.");
             return 0;
-         } else {
-            NationStore.War war = maybeWar.get();
-            if (war.peaceDeal != null && own.get().id.equals(war.peaceDeal.receiver) && other.get().id.equals(war.peaceDeal.proposer)) {
-               store.clearPeaceDeal(war);
-               store.setPeaceCooldown(other.get(), own.get(), (long)player.getServer().getTickCount() + 6000L);
-               store.notifyNation(
-                  player.getServer(),
-                  other.get(),
-                  Component.literal("[NationWars] " + own.get().name + " rejected your peace offer. You can send another in 300 seconds.")
-               );
-               store.notifyNation(player.getServer(), own.get(), Component.literal("[NationWars] Rejected peace offer from " + other.get().name + "."));
-               return 1;
-            } else {
-               fail(player, "There is no incoming peace offer from that nation.");
-               return 0;
-            }
-         }
-      } else {
-         fail(player, "Both sides must be nations.");
-         return 0;
-      }
-   }
-
-   private static int surrender(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-      ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-      NationStore store = NationStore.get();
-      Optional<NationStore.Nation> own = store.nationOf(player.getUUID());
-      Optional<NationStore.Nation> other = store.nationByName(StringArgumentType.getString(context, "country"));
-      if (!own.isEmpty() && !other.isEmpty()) {
-         Optional<NationStore.War> maybeWar = store.activeWarForCapture(own.get(), other.get()).or(() -> store.activeWarForCapture(other.get(), own.get()));
-         if (maybeWar.isEmpty()) {
-            fail(player, "There is no active war with that nation.");
+        }
+        if (own.get().usedSpecialWarLeaveIdeologies.size() >= Ideology.values().length) {
+            NationCommands.fail(player, "King Michael's Coup has already been used against every ideology.");
             return 0;
-         } else {
-            NationStore.War war = maybeWar.get();
-            int ownSide = store.sideOf(war, own.get());
-            int otherSide = store.sideOf(war, other.get());
-            if (ownSide == 0 || otherSide == 0 || ownSide == otherSide) {
-               fail(player, "That nation is not on the enemy side of your war.");
-               return 0;
-            } else if (!store.isPrimaryWarParticipant(war, own.get())) {
-               return surrenderJoinedNation(player, store, war, own.get(), other.get());
-            } else if (!store.isPrimaryWarParticipant(war, other.get())) {
-               fail(player, "Main war nations must surrender to the main enemy nation.");
-               return 0;
-            } else if (ownSide < 0) {
-               int capturedByOther = store.capturedClaimsBy(war, other.get()).size();
-               if (capturedByOther <= 0) {
-                  int target = Math.max(1, (int)Math.ceil((double)store.claimCount(own.get()) * 0.25 * own.get().doctrine().surrenderLandMultiplier));
+        }
+        Optional<NationStore.War> maybeWar = store.activeWarForCapture(own.get(), other.get()).or(() -> store.activeWarForCapture((NationStore.Nation)other.get(), (NationStore.Nation)own.get()));
+        if (maybeWar.isEmpty()) {
+            NationCommands.fail(player, "There is no active war with that nation.");
+            return 0;
+        }
+        own.get().usedSpecialWarLeaveIdeologies.add(ideologyKey);
+        store.leaveWarSafely(maybeWar.get(), own.get());
+        store.save();
+        String carolMessage = own.get().usedSpecialWarLeaveIdeologies.size() >= Ideology.values().length ? " Carol II Lifestyle is now removed." : "";
+        store.notifyNation(player.getServer(), own.get(), (Component)Component.literal((String)("[NationWars] Left the war with no consequences." + carolMessage)));
+        store.notifyNation(player.getServer(), other.get(), (Component)Component.literal((String)("[NationWars] " + own.get().name + " left the war through King Michael's Coup.")));
+        return 1;
+    }
 
-                  for (int transferred = 0; transferred < target; transferred++) {
-                     Optional<String> claim = store.borderClaimsOf(own.get())
-                        .stream()
-                        .filter(id -> !id.equals(own.get().capitalClaim))
-                        .findFirst()
-                        .or(() -> store.claimsOf(own.get()).stream().findFirst());
-                     if (claim.isEmpty()) {
-                        break;
-                     }
+    private static int warOverview(CommandContext<CommandSourceStack> context) {
+        ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)"War commands:"), false);
+        ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)"/war status"), false);
+        ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)"/war justify <nation> | /war declare <nation>"), false);
+        ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)"/war join <nation> | /war acceptjoin <nation> | /war rejectjoin <nation>"), false);
+        ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)"/war defend <nation> | /war declinedefense <nation>"), false);
+        ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)"/peace <nation> | /surrender <nation>"), false);
+        return 1;
+    }
 
-                     store.transferClaim(claim.get(), other.get());
-                     recordWarCapture(store, war, other.get(), claim.get(), otherSide);
-                  }
-               }
-
-               double treasuryShare = NationStore.roundMoney(own.get().balance * 0.5);
-               own.get().balance = NationStore.roundMoney(own.get().balance - treasuryShare);
-               other.get().balance = NationStore.roundMoney(other.get().balance + treasuryShare);
-               double leaderMoney = 0.0;
-
-               try {
-                  leaderMoney = store.confiscatePlayerMoney(UUID.fromString(own.get().owner));
-                  other.get().balance = NationStore.roundMoney(other.get().balance + leaderMoney);
-               } catch (RuntimeException var17) {
-               }
-
-               boolean deleteLoser = store.claimCount(own.get()) <= 0;
-               store.endWar(war);
-               store.notifyNation(
-                  player.getServer(),
-                  own.get(),
-                  Component.literal("You surrendered to " + other.get().name + ". Lost $" + NationStore.roundMoney(treasuryShare + leaderMoney) + ".")
-               );
-               store.notifyNation(
-                  player.getServer(),
-                  other.get(),
-                  Component.literal(own.get().name + " surrendered. Your nation received $" + NationStore.roundMoney(treasuryShare + leaderMoney) + ".")
-               );
-               if (deleteLoser) {
-                  store.notifyNation(
-                     player.getServer(),
-                     own.get(),
-                     Component.literal("[NationWars] Your nation lost all territory and was deleted. You can create a new nation.")
-                  );
-                  store.deleteNation(own.get());
-
-                  for (ServerPlayer online : player.getServer().getPlayerList().getPlayers()) {
-                     online.refreshTabListName();
-                  }
-               } else {
-                  store.save();
-               }
-
-               return 1;
-            } else if (ownSide <= 0) {
-               fail(player, "This nation is not part of that war.");
-               return 0;
-            } else {
-               for (String claimId : store.capturedClaimsBy(war, own.get())) {
-                  store.transferClaim(claimId, other.get());
-                  store.removeCapturedClaim(war, claimId);
-               }
-
-               store.endWar(war);
-               store.notifyNation(player.getServer(), own.get(), Component.literal("You surrendered and returned captured claims to " + other.get().name + "."));
-               store.notifyNation(player.getServer(), other.get(), Component.literal(own.get().name + " surrendered and returned captured claims."));
-               return 1;
+    private static int warStatus(CommandContext<CommandSourceStack> context) {
+        NationStore store = NationStore.get();
+        List<NationStore.War> wars = store.wars().stream().sorted(Comparator.comparing(war -> war.id)).toList();
+        if (wars.isEmpty()) {
+            ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)"No wars or justifications."), false);
+            return 1;
+        }
+        MinecraftServer server = ((CommandSourceStack)context.getSource()).getServer();
+        for (NationStore.War war2 : wars) {
+            String attacker = store.nationById(war2.attacker).map(nation -> nation.name).orElse(war2.attacker);
+            String defender = store.nationById(war2.defender).map(nation -> nation.name).orElse(war2.defender);
+            ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)(attacker + " vs " + defender)), false);
+            if (war2.active) {
+                ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)"  active"), false);
+                ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)("  attackers: " + NationCommands.nationNames(store, war2.attackerSide))), false);
+                ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)("  defenders: " + NationCommands.nationNames(store, war2.defenderSide))), false);
+                if (war2.joinRequests.isEmpty()) continue;
+                ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)("  pending: " + NationCommands.nationNames(store, war2.joinRequests.keySet()))), false);
+                continue;
             }
-         }
-      } else {
-         fail(player, "Both sides must be nations.");
-         return 0;
-      }
-   }
+            if (war2.pendingDefenderResponse) {
+                ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)"  waiting for defender response"), false);
+                continue;
+            }
+            long secondsLeft = Math.max(0L, (war2.justificationCompleteTick - (long)server.getTickCount()) / 20L);
+            ((CommandSourceStack)context.getSource()).sendSuccess(() -> Component.literal((String)("  justifying: " + secondsLeft + "s left")), false);
+        }
+        return 1;
+    }
 
-   private static int surrenderJoinedNation(ServerPlayer player, NationStore store, NationStore.War war, NationStore.Nation own, NationStore.Nation other) {
-      int returned = 0;
+    private static void createAllianceDefenseCalls(MinecraftServer server, NationStore store, NationStore.War war, NationStore.Nation defender) {
+        if (defender.doctrine().ideology != Ideology.DEMOCRATIC) {
+            return;
+        }
+        store.allianceOf(defender).ifPresent(alliance -> {
+            for (String allyId : alliance.members) {
+                NationStore.Nation ally;
+                if (allyId.equals(defender.id) || (ally = (NationStore.Nation)store.nationById(allyId).orElse(null)) == null || store.isWarParticipant(war, ally) || !store.addWarDefenseCall(war, ally, defender)) continue;
+                store.notifyNation(server, ally, (Component)Component.literal((String)("[NationWars] Democratic ally " + defender.name + " called for defense. Use /war defend " + defender.id + " or /war declinedefense " + defender.id + ".")));
+            }
+        });
+    }
 
-      for (String claimId : new ArrayList<>(store.capturedClaimsBy(war, own))) {
-         store.transferClaim(claimId, other);
-         store.removeCapturedClaim(war, claimId);
-         returned++;
-      }
+    private static int peace(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> own = store.nationOf(player.getUUID());
+        Optional<NationStore.Nation> other = store.nationByName(StringArgumentType.getString(context, (String)"country"));
+        if (own.isEmpty() || other.isEmpty()) {
+            NationCommands.fail(player, "Both sides must be nations.");
+            return 0;
+        }
+        Optional<NationStore.War> maybeWar = store.activeWarForCapture(own.get(), other.get()).or(() -> store.activeWarForCapture((NationStore.Nation)other.get(), (NationStore.Nation)own.get()));
+        if (maybeWar.isEmpty()) {
+            NationCommands.fail(player, "There is no active war with that nation.");
+            return 0;
+        }
+        NationStore.War war = maybeWar.get();
+        if (!(war.peaceDeal != null && own.get().id.equals(war.peaceDeal.receiver) || store.peaceCooldownUntil(own.get(), other.get()) <= (long)player.getServer().getTickCount())) {
+            long secondsLeft = Math.max(1L, (store.peaceCooldownUntil(own.get(), other.get()) - (long)player.getServer().getTickCount()) / 20L);
+            NationCommands.fail(player, "Your last peace offer was rejected. Try again in " + secondsLeft + " seconds.");
+            return 0;
+        }
+        player.openMenu((MenuProvider)new SimpleMenuProvider((containerId, inventory, viewer) -> new PeaceDealMenu(containerId, inventory, (NationStore.Nation)own.get(), (NationStore.Nation)other.get(), war), (Component)Component.literal((String)"Offer Peace Deal")));
+        return 1;
+    }
 
-      if (!store.removeWarParticipant(war, own)) {
-         fail(player, "Could not leave that war.");
-         return 0;
-      } else {
-         store.notifyNation(
-            player.getServer(),
-            own,
-            Component.literal("[NationWars] You surrendered to " + other.name + " and left the war. Returned captured claims: " + returned + ".")
-         );
-         store.notifyNation(
-            player.getServer(),
-            other,
-            Component.literal("[NationWars] " + own.name + " surrendered and left the war. Returned captured claims: " + returned + ".")
-         );
-         return 1;
-      }
-   }
+    private static int rejectPeace(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> own = store.nationOf(player.getUUID());
+        Optional<NationStore.Nation> other = store.nationByName(StringArgumentType.getString(context, (String)"country"));
+        if (own.isEmpty() || other.isEmpty()) {
+            NationCommands.fail(player, "Both sides must be nations.");
+            return 0;
+        }
+        Optional<NationStore.War> maybeWar = store.activeWarForCapture(own.get(), other.get()).or(() -> store.activeWarForCapture((NationStore.Nation)other.get(), (NationStore.Nation)own.get()));
+        if (maybeWar.isEmpty()) {
+            NationCommands.fail(player, "There is no active war with that nation.");
+            return 0;
+        }
+        NationStore.War war = maybeWar.get();
+        if (war.peaceDeal == null || !own.get().id.equals(war.peaceDeal.receiver) || !other.get().id.equals(war.peaceDeal.proposer)) {
+            NationCommands.fail(player, "There is no incoming peace offer from that nation.");
+            return 0;
+        }
+        store.clearPeaceDeal(war);
+        store.setPeaceCooldown(other.get(), own.get(), (long)player.getServer().getTickCount() + 6000L);
+        store.notifyNation(player.getServer(), other.get(), (Component)Component.literal((String)("[NationWars] " + own.get().name + " rejected your peace offer. You can send another in 300 seconds.")));
+        store.notifyNation(player.getServer(), own.get(), (Component)Component.literal((String)("[NationWars] Rejected peace offer from " + other.get().name + ".")));
+        return 1;
+    }
 
-   private static void recordWarCapture(NationStore store, NationStore.War war, NationStore.Nation captor, String claimId, int capturingSide) {
-      store.recordCapturedClaim(war, captor, claimId);
-      if (capturingSide > 0) {
-         war.attackerCapturedClaims.add(claimId);
-      } else {
-         war.attackerCapturedClaims.remove(claimId);
-      }
+    private static int surrender(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
+        NationStore store = NationStore.get();
+        Optional<NationStore.Nation> own = store.nationOf(player.getUUID());
+        Optional<NationStore.Nation> other = store.nationByName(StringArgumentType.getString(context, (String)"country"));
+        if (own.isEmpty() || other.isEmpty()) {
+            NationCommands.fail(player, "Both sides must be nations.");
+            return 0;
+        }
+        Optional<NationStore.War> maybeWar = store.activeWarForCapture(own.get(), other.get()).or(() -> store.activeWarForCapture((NationStore.Nation)other.get(), (NationStore.Nation)own.get()));
+        if (maybeWar.isEmpty()) {
+            NationCommands.fail(player, "There is no active war with that nation.");
+            return 0;
+        }
+        NationStore.War war = maybeWar.get();
+        int ownSide = store.sideOf(war, own.get());
+        int otherSide = store.sideOf(war, other.get());
+        if (ownSide == 0 || otherSide == 0 || ownSide == otherSide) {
+            NationCommands.fail(player, "That nation is not on the enemy side of your war.");
+            return 0;
+        }
+        if (!store.isPrimaryWarParticipant(war, own.get())) {
+            return NationCommands.surrenderJoinedNation(player, store, war, own.get(), other.get());
+        }
+        if (!store.isPrimaryWarParticipant(war, other.get())) {
+            NationCommands.fail(player, "Main war nations must surrender to the main enemy nation.");
+            return 0;
+        }
+        if (ownSide < 0) {
+            int capturedByOther = store.capturedClaimsBy(war, other.get()).size();
+            if (capturedByOther <= 0) {
+                Optional<String> claim;
+                int target = Math.max(1, (int)Math.ceil((double)store.claimCount(own.get()) * 0.25 * own.get().doctrine().surrenderLandMultiplier));
+                for (int transferred = 0; transferred < target && !(claim = store.borderClaimsOf(own.get()).stream().filter(id -> !id.equals(((NationStore.Nation)own.get()).capitalClaim)).findFirst().or(() -> store.claimsOf((NationStore.Nation)own.get()).stream().findFirst())).isEmpty(); ++transferred) {
+                    store.transferClaim(claim.get(), other.get());
+                    NationCommands.recordWarCapture(store, war, other.get(), claim.get(), otherSide);
+                }
+            }
+            double treasuryShare = NationStore.roundMoney(own.get().balance * 0.5);
+            own.get().balance = NationStore.roundMoney(own.get().balance - treasuryShare);
+            other.get().balance = NationStore.roundMoney(other.get().balance + treasuryShare);
+            double leaderMoney = 0.0;
+            try {
+                leaderMoney = store.confiscatePlayerMoney(UUID.fromString(own.get().owner));
+                other.get().balance = NationStore.roundMoney(other.get().balance + leaderMoney);
+            }
+            catch (RuntimeException runtimeException) {
+                // empty catch block
+            }
+            boolean deleteLoser = store.claimCount(own.get()) <= 0;
+            store.endWar(war);
+            store.notifyNation(player.getServer(), own.get(), (Component)Component.literal((String)("You surrendered to " + other.get().name + ". Lost $" + NationStore.roundMoney(treasuryShare + leaderMoney) + ".")));
+            store.notifyNation(player.getServer(), other.get(), (Component)Component.literal((String)(own.get().name + " surrendered. Your nation received $" + NationStore.roundMoney(treasuryShare + leaderMoney) + ".")));
+            if (deleteLoser) {
+                store.notifyNation(player.getServer(), own.get(), (Component)Component.literal((String)"[NationWars] Your nation lost all territory and was deleted. You can create a new nation."));
+                store.deleteNation(own.get());
+                for (ServerPlayer online : player.getServer().getPlayerList().getPlayers()) {
+                    online.refreshTabListName();
+                }
+            } else {
+                store.save();
+            }
+            return 1;
+        }
+        if (ownSide > 0) {
+            for (String claimId : store.capturedClaimsBy(war, own.get())) {
+                store.transferClaim(claimId, other.get());
+                store.removeCapturedClaim(war, claimId);
+            }
+            store.endWar(war);
+            store.notifyNation(player.getServer(), own.get(), (Component)Component.literal((String)("You surrendered and returned captured claims to " + other.get().name + ".")));
+            store.notifyNation(player.getServer(), other.get(), (Component)Component.literal((String)(own.get().name + " surrendered and returned captured claims.")));
+            return 1;
+        }
+        NationCommands.fail(player, "This nation is not part of that war.");
+        return 0;
+    }
 
-      store.save();
-   }
+    private static int surrenderJoinedNation(ServerPlayer player, NationStore store, NationStore.War war, NationStore.Nation own, NationStore.Nation other) {
+        int returned = 0;
+        for (String claimId : new ArrayList<String>(store.capturedClaimsBy(war, own))) {
+            store.transferClaim(claimId, other);
+            store.removeCapturedClaim(war, claimId);
+            ++returned;
+        }
+        if (!store.removeWarParticipant(war, own)) {
+            NationCommands.fail(player, "Could not leave that war.");
+            return 0;
+        }
+        store.notifyNation(player.getServer(), own, (Component)Component.literal((String)("[NationWars] You surrendered to " + other.name + " and left the war. Returned captured claims: " + returned + ".")));
+        store.notifyNation(player.getServer(), other, (Component)Component.literal((String)("[NationWars] " + own.name + " surrendered and left the war. Returned captured claims: " + returned + ".")));
+        return 1;
+    }
 
-   private static ClaimKey currentClaim(ServerPlayer player) {
-      ServerLevel level = player.serverLevel();
-      ChunkPos chunk = player.chunkPosition();
-      return ClaimKey.of(level, chunk);
-   }
+    private static void recordWarCapture(NationStore store, NationStore.War war, NationStore.Nation captor, String claimId, int capturingSide) {
+        store.recordCapturedClaim(war, captor, claimId);
+        if (capturingSide > 0) {
+            war.attackerCapturedClaims.add(claimId);
+        } else {
+            war.attackerCapturedClaims.remove(claimId);
+        }
+        store.save();
+    }
 
-   private static boolean touchesNationClaim(NationStore store, NationStore.Nation nation, ClaimKey claim) {
-      for (String owned : store.claimsOf(nation)) {
-         if (claim.touches(ClaimKey.parse(owned))) {
+    private static ClaimKey currentClaim(ServerPlayer player) {
+        ServerLevel level = player.serverLevel();
+        ChunkPos chunk = player.chunkPosition();
+        return ClaimKey.of(level, chunk);
+    }
+
+    private static boolean touchesNationClaim(NationStore store, NationStore.Nation nation, ClaimKey claim) {
+        for (String owned : store.claimsOf(nation)) {
+            if (!claim.touches(ClaimKey.parse(owned))) continue;
             return true;
-         }
-      }
+        }
+        return false;
+    }
 
-      return false;
-   }
-
-   private static double claimCost(NationStore store, NationStore.Nation nation, ClaimKey claim) {
-      double expansion = 1.0 + (double)Math.max(0, store.claimCount(nation) - 1) * 0.1;
-      double distance = 1.0;
-      if (nation.doctrine().distanceClaimScaling && nation.capitalClaim != null && !nation.capitalClaim.isBlank()) {
-         ClaimKey capital = ClaimKey.parse(nation.capitalClaim);
-         if (capital.dimension().equals(claim.dimension())) {
+    private static double claimCost(NationStore store, NationStore.Nation nation, ClaimKey claim) {
+        ClaimKey capital;
+        double expansion = 1.0 + (double)Math.max(0, store.claimCount(nation) - 1) * 0.1;
+        double distance = 1.0;
+        if (nation.doctrine().distanceClaimScaling && nation.capitalClaim != null && !nation.capitalClaim.isBlank() && (capital = ClaimKey.parse(nation.capitalClaim)).dimension().equals(claim.dimension())) {
             int chunks = Math.abs(capital.x() - claim.x()) + Math.abs(capital.z() - claim.z());
             distance += (double)chunks * 0.03;
-         }
-      }
+        }
+        return NationStore.roundMoney(100.0 * expansion * distance * nation.doctrine().claimCostMultiplier);
+    }
 
-      return NationStore.roundMoney(100.0 * expansion * distance * nation.doctrine().claimCostMultiplier);
-   }
+    private static boolean canDefenderRejectWar(NationStore store, NationStore.Nation attacker, NationStore.Nation defender) {
+        return attacker.doctrine().canRejectWarDeclarations && store.claimCount(defender) > store.claimCount(attacker) && !store.hasRejectedWarDeclaration(attacker, defender);
+    }
 
-   private static boolean canDefenderRejectWar(NationStore store, NationStore.Nation attacker, NationStore.Nation defender) {
-      return attacker.doctrine().canRejectWarDeclarations
-         && store.claimCount(defender) > store.claimCount(attacker)
-         && !store.hasRejectedWarDeclaration(attacker, defender);
-   }
+    static int warJustificationSeconds(NationStore.Nation attacker, NationStore.Nation defender) {
+        int seconds = 90;
+        if (attacker.doctrine() == Doctrine.GERMAN) {
+            seconds -= 40;
+        }
+        if (defender.doctrine() == Doctrine.ROMANIAN) {
+            seconds += 30;
+        }
+        return Math.max(10, seconds);
+    }
 
-   static int warJustificationSeconds(NationStore.Nation attacker, NationStore.Nation defender) {
-      int seconds = 90;
-      if (attacker.doctrine() == Doctrine.GERMAN) {
-         seconds -= 40;
-      }
+    private static double appraise(ItemStack stack) {
+        double each = 0.2;
+        if (stack.is(Items.DIAMOND)) {
+            each = 30.0;
+        } else if (stack.is(Items.EMERALD)) {
+            each = 24.0;
+        } else if (stack.is(Items.GOLD_INGOT)) {
+            each = 10.0;
+        } else if (stack.is(Items.IRON_INGOT)) {
+            each = 5.0;
+        } else if (stack.is(Items.COPPER_INGOT)) {
+            each = 2.0;
+        } else if (stack.is(Items.COAL)) {
+            each = 1.0;
+        } else if (stack.is(Items.WHEAT) || stack.is(Items.CARROT) || stack.is(Items.POTATO) || stack.is(Items.BEETROOT)) {
+            each = 1.5;
+        }
+        return NationStore.roundMoney(each * (double)stack.getCount());
+    }
 
-      if (defender.doctrine() == Doctrine.ROMANIAN) {
-         seconds += 30;
-      }
+    private static String nationNames(NationStore store, Iterable<String> ids) {
+        ArrayList<String> names = new ArrayList<String>();
+        for (String id : ids) {
+            names.add(store.nationById(id).map(nation -> nation.name).orElse(id));
+        }
+        names.sort(String::compareToIgnoreCase);
+        return String.join((CharSequence)",", names);
+    }
 
-      return Math.max(10, seconds);
-   }
+    private static void ok(ServerPlayer player, String message) {
+        player.sendSystemMessage((Component)Component.literal((String)("[NationWars] " + message)));
+    }
 
-   private static double appraise(ItemStack stack) {
-      double each = 0.2;
-      if (stack.is(Items.DIAMOND)) {
-         each = 30.0;
-      } else if (stack.is(Items.EMERALD)) {
-         each = 24.0;
-      } else if (stack.is(Items.GOLD_INGOT)) {
-         each = 10.0;
-      } else if (stack.is(Items.IRON_INGOT)) {
-         each = 5.0;
-      } else if (stack.is(Items.COPPER_INGOT)) {
-         each = 2.0;
-      } else if (stack.is(Items.COAL)) {
-         each = 1.0;
-      } else if (stack.is(Items.WHEAT) || stack.is(Items.CARROT) || stack.is(Items.POTATO) || stack.is(Items.BEETROOT)) {
-         each = 1.5;
-      }
+    private static void fail(ServerPlayer player, String message) {
+        player.sendSystemMessage((Component)Component.literal((String)("[NationWars] " + message)));
+    }
 
-      return NationStore.roundMoney(each * (double)stack.getCount());
-   }
-
-   private static String nationNames(NationStore store, Iterable<String> ids) {
-      List<String> names = new ArrayList<>();
-
-      for (String id : ids) {
-         names.add(store.nationById(id).map(nation -> nation.name).orElse(id));
-      }
-
-      names.sort(String::compareToIgnoreCase);
-      return String.join(",", names);
-   }
-
-   private static void ok(ServerPlayer player, String message) {
-      player.sendSystemMessage(Component.literal("[NationWars] " + message));
-   }
-
-   private static void fail(ServerPlayer player, String message) {
-      player.sendSystemMessage(Component.literal("[NationWars] " + message));
-   }
-
-   private static record PendingNationCreation(Doctrine doctrine, long expiresTick) {
-   }
+    private record PendingNationCreation(Doctrine doctrine, long expiresTick) {
+    }
 }

@@ -1,14 +1,27 @@
-# Nation Wars 0.2.0
+# Nation Wars
 
-This tag preserves Nation Wars 0.2.0 from its original CurseForge release.
+Recovered development sources for Nation Wars 0.2.2.
 
-The original pre-0.2.2 source repository was not retained. The Java files in
-this snapshot were reconstructed from the published JAR and are provided for
-historical reference. They may require manual repair before compiling. The
-original release JAR attached to the matching GitHub Release is the
-authoritative binary.
+## Requirements
 
-Nation Wars targets Minecraft 1.21.1 with NeoForge and integrates with Open
-Parties and Claims.
+- Java 21
+- Minecraft 1.21.1
+- NeoForge 21.1.227 or newer
+- Open Parties and Claims 0.27.5 through 0.27.x
 
-See `RECOVERED_SOURCE.md` for provenance and verification information.
+## Build
+
+On Windows:
+
+```powershell
+.\gradlew.bat build
+```
+
+The output JAR is created under `build/libs`.
+
+## Recovery note
+
+The Java source was reconstructed from the published `nationwars-0.2.2.jar`.
+Decompiler-generated formatting, explicit casts, and temporary variable names may
+differ from the original source. Original comments and version-control history
+could not be recovered from the compiled artifact.

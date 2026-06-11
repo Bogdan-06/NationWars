@@ -4,7 +4,7 @@ license="All Rights Reserved"
 
 [[mods]]
 modId="nationwars"
-version="0.2.0"
+version="0.2.2"
 displayName="Nation Wars"
 authors="Moth"
 description='''
@@ -28,6 +28,6 @@ side="BOTH"
 [[dependencies.nationwars]]
 modId="openpartiesandclaims"
 type="required"
-versionRange="[0.26.3,0.27)"
+versionRange="[0.27.5,0.28)"
 ordering="AFTER"
 side="BOTH"
