@@ -1,0 +1,61 @@
+CHECKLIST 7 - Update 0.3
+------------
+
+- GENERAL - Add /nation guarantee. A formal protection for a country that is not in your faction. If country you guarantee got declared war on, youre called to arms immediately.
+
+- GENERAL - Rework /spy (more in the other file)
+
+- GENERAL - /Gamerule LimitedDoctrines true/false (PLEASE)
+
+- GENERAL - Make enemy beds invincible during war
+
+- GENERAL - Add /wars that shows all current wars on the server
+
+- GENERAL - Add dev commands
+
+- GENERAL - Make doctrine ids shorter: GER, FRA, SOV, ENG, USA, ITA, ROM (don't forget about /nation doctrines)
+
+- GENERAL - Make it so when player dies during war, theyre unable to attack or defend chunks for 20s after respawn.
+
+- FRA - Replace "White Flag" with "Spy Master": You gain 5 additional spies which cost 300$ each
+
+- GER - Replace "1945" with "Turing's Bombe": Your counterspies only have a 50% chance of successfully blocking an attack, instead of the base 100%.
+
+- GENERAL - You can only declare war if the target has atleast one player online
+
+- GENERAL - The spy mission RAID is unavaible if all of the target members are offline
+
+- UK - Edit "Sea lion" perk to: "your coast and river claims are captured 10s faster"
+
+- USA - Edit "Isolation" perk to: "distance from the capital raises claim cost"
+
+- Sov - Edit "Great Patriotic War" perk to: "your land takes twice as long to conquer unless 2 attackers are present"
+
+- USA - Edit "Worldwide Economy" perk to: Lower market prices
+
+- USA - Edit "Capitalism" perk to: "pay the cost of the claim to make it generate passive income"
+
+- Ita - Edit "Alpes" perk to: "your mountain and hilly claims take 15s longer to capture"
+
+- Ita - Edit "Push-over" perk to: "nations with more claims can reject your war declaration once" (after that Italy has to justify again)
+
+- Ita - Edit "Civil War" perk to: "recapturing land takes 10s longer."
+
+- Rom - Edit "King Michael's Coup" perk to: "you can leave war without consequences once for every ideology. When all of the leaves are already used, "Carol II Lifestyle" is removed"
+
+- Rom - Rename "The Iron Guard" to "Iron Guard"
+
+- Rom - Edit "Iron Guard" perk to: "losing core claim raises the maintenance cost for all the rest by 0.1x"
+
+
+
+
+
+
+
+
+
+
+
+
+

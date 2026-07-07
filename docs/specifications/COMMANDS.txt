@@ -1,0 +1,51 @@
+COMMANDS
+
+/spy create - Creates a spy agency, costs $3500 : "You have successfully created a spy agency"
+
+/spy hire - Hires a new spy. Every another spy costs more money. Limit of spies is 10 : "You have hired a new spy which costed you $x"
+
+/spy set [country] <amount> - sets a spy/spies in country of your choosing: "The spy will arrive at the destination in x seconds"
+
+/spy missions - shows all the spy missions
+
+/spy mission [mission] [country] <chunk> - puts your set spy on a mission you chose (<chunk> is only needed for some missions) : "You've sent your spy in <b> [country] </b> on a mission: <b> [mission] </b> which will take x seconds"
+
+/spy info show [country] - Shows all of the known for you info abt a country (doesn't update by itself)
+
+/spy status - shows the status of all of your spies. (the same UI as for /war status)
+
+/spy info update [country] - updates all of the known info about a country. Costs: $100 per one info
+
+(spy info is: name, doctrine, ideology, balance, capital, size and guarantees/nation faction members)
+
+
+MISSIONS (/spy mission [mission] [country])
+
+<chunk> counterspy - defends spy attacks from enemies on selected chunk.
+
+(cannot counter-spy and risk-free)
+
+doctrine - reveals country's doctrine and ideology. Costs: $250
+
+treasury - reveals how much money country has in it's treasury. Costs: $200
+
+members - shows all the country's members. Costs: $100
+
+faction - shows if or what faction us the country is in. Also gives information about who guarantees this country. Costs: $200
+
+size - shows how many chunks country has (needed for RAID, usefull for Italy). Costs: $100
+
+scout <chunk> <chunk> <chunk> - It checks if 3 of the selected chunks are a capital or not. "None of the chunks are the capital" or "Chunk 9;1 is the capital city" Costs: $300
+
+(cannot counterspy, however not risk-free)
+
+<chunk> infiltrate - disables a counterspy in a specific chunk of limited amount of time. If its a capital, it also prevents the target from spending any money Risk: 30% fail Costs: $500
+
+<chunk> paralyze - prevents the nation from generating passive income from the chunk (counter for USA) Risk: 30% fail Costs: $300
+
+(can counter-spy)
+
+<chunk> steal - steals 45% money from country's treasury (in order to steal with success the selected chunk has to be the capital), . Risk: 40% fail Costs: $700
+
+<chunk> raid - disables ALL of the protection for selected chunk for limited amount of time. Only avaible if the target country is at least half as small as you or at most 2x your size (example: If your nation has 100 chunks, you can raid nations that have 50-200 chunks. Risk: 50% fail Cost: $1200
+

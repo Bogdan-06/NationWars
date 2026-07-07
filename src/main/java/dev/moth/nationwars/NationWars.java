@@ -28,10 +28,12 @@ public final class NationWars {
     public static final Logger LOGGER = LogUtils.getLogger();
 
     public NationWars(IEventBus modBus, ModContainer container) {
+        NationWarsGameRules.bootstrap();
         NeoForge.EVENT_BUS.register(NationCommands.class);
         NeoForge.EVENT_BUS.register(NationEvents.class);
+        NeoForge.EVENT_BUS.register(SpyCommands.class);
+        NeoForge.EVENT_BUS.register(DevCommands.class);
         NeoForge.EVENT_BUS.register(DoctrineDatapackReloadListener.class);
         NeoForge.EVENT_BUS.register(OpacClaimsBridge.class);
     }
 }
-

@@ -22,13 +22,13 @@ import java.util.stream.Collectors;
 import net.minecraft.resources.ResourceLocation;
 
 public enum Doctrine {
-    GERMAN("german", "Germany", Ideology.FASCIST, 1.0, 1.0, 1.35, 4, 35, 1.0, 1.6, 1.0, 1.0, 1.0, false, false, true, false, false, false, false, false),
-    SOVIET("soviet", "Soviet Union", Ideology.COMMUNIST, 0.8, 1.0, 0.75, 4, 50, 1.0, 1.0, 1.25, 1.0, 1.0, false, false, false, false, false, false, false, false),
-    AMERICAN("american", "United States", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 4, 50, 1.0, 1.0, 0.8, 1.0, 1.0, true, true, true, true, false, false, false, false),
-    FRENCH("french", "France", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 4, 50, 1.0, 0.6, 1.0, 1.0, 1.0, false, false, true, false, false, false, false, false),
-    BRITISH("british", "United Kingdom", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 6, 50, 1.0, 1.0, 1.0, 1.0, 3.0, false, false, true, false, false, false, false, false),
-    ITALIAN("italian", "Italy", Ideology.FASCIST, 1.0, 1.0, 1.0, 4, 50, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, true, true, false, false),
-    ROMANIAN("romanian", "Romania", Ideology.NON_ALIGNED, 1.0, 1.0, 1.0, 4, 50, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, false, false, true, true);
+    GERMAN("GER", "Germany", Ideology.FASCIST, 1.0, 1.0, 1.35, 4, 35, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, false, false, false, false),
+    SOVIET("SOV", "Soviet Union", Ideology.COMMUNIST, 0.8, 1.0, 0.75, 4, 50, 1.0, 1.0, 1.25, 1.0, 1.0, false, false, false, false, false, false, false, false),
+    AMERICAN("USA", "United States", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 4, 50, 1.0, 1.0, 0.8, 1.0, 1.0, true, true, true, true, false, false, false, false),
+    FRENCH("FRA", "France", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 4, 50, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, false, false, false, false),
+    BRITISH("ENG", "United Kingdom", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 6, 50, 1.0, 1.0, 1.0, 1.0, 3.0, false, false, true, false, false, false, false, false),
+    ITALIAN("ITA", "Italy", Ideology.FASCIST, 1.0, 1.0, 1.0, 4, 50, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, true, true, false, false),
+    ROMANIAN("ROM", "Romania", Ideology.NON_ALIGNED, 1.0, 1.0, 1.0, 4, 50, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, false, false, true, true);
 
     public final String id;
     public String displayName;
@@ -107,8 +107,17 @@ public enum Doctrine {
         if (id == null) {
             return Optional.empty();
         }
-        String normalized = id.trim().toLowerCase(Locale.ROOT);
-        return Arrays.stream(Doctrine.values()).filter(doctrine -> doctrine.id.equals(normalized)).findFirst();
+        String normalized = id.trim().toUpperCase(Locale.ROOT);
+        return switch (normalized) {
+            case "GER", "GERMAN", "GERMANY" -> Optional.of(GERMAN);
+            case "SOV", "SOVIET", "SOVIET_UNION", "USSR" -> Optional.of(SOVIET);
+            case "USA", "AMERICAN", "UNITED_STATES", "US" -> Optional.of(AMERICAN);
+            case "FRA", "FRENCH", "FRANCE" -> Optional.of(FRENCH);
+            case "ENG", "BRITISH", "UNITED_KINGDOM", "UK" -> Optional.of(BRITISH);
+            case "ITA", "ITALIAN", "ITALY" -> Optional.of(ITALIAN);
+            case "ROM", "ROMANIAN", "ROMANIA" -> Optional.of(ROMANIAN);
+            default -> Optional.empty();
+        };
     }
 
     public static void resetAllToDefaults() {
@@ -200,26 +209,26 @@ public enum Doctrine {
 
     private static String defaultIconItemId(String id) {
         return switch (id) {
-            case "german" -> "minecraft:netherite_block";
-            case "soviet" -> "minecraft:redstone_block";
-            case "american" -> "minecraft:diamond_block";
-            case "french" -> "minecraft:quartz_block";
-            case "british" -> "minecraft:lapis_block";
-            case "italian" -> "minecraft:emerald_block";
-            case "romanian" -> "minecraft:copper_block";
+            case "GER" -> "minecraft:netherite_block";
+            case "SOV" -> "minecraft:redstone_block";
+            case "USA" -> "minecraft:diamond_block";
+            case "FRA" -> "minecraft:quartz_block";
+            case "ENG" -> "minecraft:lapis_block";
+            case "ITA" -> "minecraft:emerald_block";
+            case "ROM" -> "minecraft:copper_block";
             default -> "minecraft:paper";
         };
     }
 
     private static List<String> defaultPerkLore(String id) {
         return switch (id) {
-            case "german" -> List.of("+ Blitzkrieg: enemy claims take 35s to capture", "+ Gleiwitz Incident: war justification is 40s faster", "- War Reparations: claim maintenance costs 1.35x", "- 1945: surrender gives up 40% of land");
-            case "soviet" -> List.of("+ Mother Russia: claims and maintenance cost less", "+ Great Patriotic War: your land takes 200% longer", "  to capture unless 2 attackers are in the claim", "- Collectivity: capital produces no passive treasury money", "- Yellow Curtains: buying from market costs more");
-            case "american" -> List.of("+ Capitalism: pay to make owned claims pay the treasury", "+ Worldwide Economy: cheaper market buys and better sales", "- Pacifism: cannot declare wars", "- Isolation: claims cost more farther from capital");
-            case "french" -> List.of("+ White Flag: surrender only gives up 15% of land", "+ The Maginot Line: your land takes 25s longer to capture", "- Casus Foederis: declining allies costs money", "- No War Support: war-held land maintenance is higher");
-            case "british" -> List.of("+ Ports: coast and river claims pay the treasury", "+ Colonies: more starter claims", "- Sea Lion: coast and river claims fall 10s faster", "- Neville Chamberlain: peace offers cost 3x more");
-            case "italian" -> List.of("+ Developed Infrastructure: Speed II on owned claims", "  and better random building payouts", "+ Alpes: hill and mountain claims take 15s longer", "- Push-over: bigger nations can reject once", "- Civil War: retaking captured land takes 10s longer");
-            case "romanian" -> List.of("+ King Michael's Coup: leave one war without penalties", "+ Flexible Foreign Policy: enemies justify 30s longer", "- Iron Guard: losing core land raises maintenance by 0.1x", "- Carol II Lifestyle: treasury can randomly lose money");
+            case "GER" -> List.of("+ Blitzkrieg: enemy claims take 35s to capture", "+ Gleiwitz Incident: war justification is 40s faster", "- War Reparations: claim maintenance costs 1.35x", "- Turing's Bombe: counterspies block only 50% of attacks");
+            case "SOV" -> List.of("+ Mother Russia: claims and maintenance cost less", "+ Great Patriotic War: land takes twice as long", "  to conquer unless 2 attackers are present", "- Collectivity: capital produces no passive treasury money", "- Yellow Curtains: buying from market costs more");
+            case "USA" -> List.of("+ Capitalism: pay the claim cost to generate income", "+ Worldwide Economy: lower market prices", "- Pacifism: cannot declare wars", "- Isolation: distance from the capital raises claim cost");
+            case "FRA" -> List.of("+ Spy Master: 5 extra spies costing $300 each", "+ The Maginot Line: your land takes 25s longer to capture", "- Casus Foederis: declining allies costs money", "- No War Support: war-held land maintenance is higher");
+            case "ENG" -> List.of("+ Ports: coast and river claims pay the treasury", "+ Colonies: more starter claims", "- Sea Lion: coast and river claims are captured 10s faster", "- Neville Chamberlain: peace offers cost 3x more");
+            case "ITA" -> List.of("+ Developed Infrastructure: Speed II on owned claims", "  and better random building payouts", "+ Alpes: mountain and hilly claims take 15s longer", "- Push-over: nations with more claims can reject once", "- Civil War: recapturing land takes 10s longer");
+            case "ROM" -> List.of("+ King Michael's Coup: one safe leave per ideology", "+ Flexible Foreign Policy: enemies justify 30s longer", "- Iron Guard: losing a core claim raises maintenance 0.1x", "- Carol II Lifestyle: drains money until all leaves are used");
             default -> List.of();
         };
     }
@@ -274,4 +283,3 @@ public enum Doctrine {
         return List.copyOf(values);
     }
 }
-

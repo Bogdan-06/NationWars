@@ -48,9 +48,11 @@ public final class MarketMenu
 extends AbstractContainerMenu {
     private static final int ROWS = 6;
     private static final int MARKET_SLOTS = 54;
+    private static final int PAGE_SIZE = 45;
     private final Inventory playerInventory;
     private final SimpleContainer marketContainer;
     private final int[] listingIds = new int[54];
+    private int page;
 
     public MarketMenu(int containerId, Inventory playerInventory) {
         super(MenuType.GENERIC_9x6, containerId);
@@ -88,6 +90,16 @@ extends AbstractContainerMenu {
             if (player instanceof ServerPlayer) {
                 ServerPlayer serverPlayer = (ServerPlayer)player;
                 if (clickType == ClickType.PICKUP || clickType == ClickType.QUICK_MOVE) {
+                    if (slotIndex == 45 && this.page > 0) {
+                        --this.page;
+                        this.refreshAndSync();
+                        return;
+                    }
+                    if (slotIndex == 53 && this.page + 1 < this.pageCount()) {
+                        ++this.page;
+                        this.refreshAndSync();
+                        return;
+                    }
                     this.buyListing(serverPlayer, slotIndex);
                 }
             }
@@ -108,9 +120,10 @@ extends AbstractContainerMenu {
         }
         NationStore store = NationStore.get();
         List<NationStore.MarketListing> listings = store.marketListings();
+        int pageCount = this.pageCount();
+        this.page = Math.min(this.page, pageCount - 1);
         int slot = 0;
-        for (NationStore.MarketListing listing : listings) {
-            if (slot >= 54) break;
+        for (NationStore.MarketListing listing : listings.stream().skip((long)this.page * PAGE_SIZE).limit(PAGE_SIZE).toList()) {
             ItemStack stack = store.listingStack(listing, (HolderLookup.Provider)this.playerInventory.player.registryAccess());
             if (stack.isEmpty()) continue;
             this.marketContainer.setItem(slot, this.displayStack(stack, listing));
@@ -123,6 +136,24 @@ extends AbstractContainerMenu {
             empty.set(DataComponents.LORE, new ItemLore(List.of(Component.literal((String)"Use /market sellhand <price> to list your held stack."))));
             this.marketContainer.setItem(22, empty);
         }
+        if (this.page > 0) {
+            this.marketContainer.setItem(45, control(Items.ARROW, "Previous page"));
+        }
+        this.marketContainer.setItem(49, control(Items.WRITABLE_BOOK, "Market page " + (this.page + 1) + "/" + pageCount));
+        if (this.page + 1 < pageCount) {
+            this.marketContainer.setItem(53, control(Items.ARROW, "Next page"));
+        }
+    }
+
+    private int pageCount() {
+        int count = NationStore.get().marketListings().size();
+        return Math.max(1, (count + PAGE_SIZE - 1) / PAGE_SIZE);
+    }
+
+    private static ItemStack control(net.minecraft.world.item.Item item, String name) {
+        ItemStack stack = new ItemStack(item);
+        stack.set(DataComponents.CUSTOM_NAME, Component.literal(name));
+        return stack;
     }
 
     private ItemStack displayStack(ItemStack stack, NationStore.MarketListing listing) {

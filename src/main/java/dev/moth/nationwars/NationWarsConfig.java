@@ -71,6 +71,9 @@ public final class NationWarsConfig {
         if (this.doctrineLimits == null) {
             this.doctrineLimits = new LinkedHashMap<String, Integer>();
         }
+        Map<String, Integer> normalizedLimits = new LinkedHashMap<String, Integer>();
+        this.doctrineLimits.forEach((id, limit) -> Doctrine.byId(id).ifPresent(doctrine -> normalizedLimits.putIfAbsent(doctrine.id, limit)));
+        this.doctrineLimits = normalizedLimits;
         this.defaultDoctrineLimit = Math.max(0, this.defaultDoctrineLimit);
         for (Doctrine doctrine : Doctrine.values()) {
             this.doctrineLimits.putIfAbsent(doctrine.id, this.defaultDoctrineLimit);
@@ -90,4 +93,3 @@ public final class NationWarsConfig {
         }
     }
 }
-

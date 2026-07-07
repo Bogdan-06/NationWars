@@ -62,6 +62,8 @@ extends AbstractContainerMenu {
     private final Action[] actions = new Action[54];
     private NationStore.PeaceDeal draft;
     private boolean viewingIncoming;
+    private int demandPage;
+    private int offerPage;
 
     public PeaceDealMenu(int containerId, Inventory playerInventory, NationStore.Nation ownNation, NationStore.Nation otherNation, NationStore.War war) {
         super(MenuType.GENERIC_9x6, containerId);
@@ -139,6 +141,7 @@ extends AbstractContainerMenu {
         for (int slot : List.of(Integer.valueOf(13), Integer.valueOf(22), Integer.valueOf(31), Integer.valueOf(40))) {
             this.dealContainer.setItem(slot, PeaceDealMenu.item(Items.BLACK_STAINED_GLASS_PANE, " ", List.of()));
         }
+        this.drawPageControls();
         this.drawClaimColumn(true);
         this.drawClaimColumn(false);
         this.drawControls();
@@ -148,7 +151,15 @@ extends AbstractContainerMenu {
         NationStore store = NationStore.get();
         NationStore.Nation source = demands ? this.otherNation : this.ownNation;
         int[] slots = demands ? DEMAND_SLOTS : OFFER_SLOTS;
-        List<String> claims = store.borderClaimsOf(source).stream().filter(claimId -> !claimId.equals(source.capitalClaim)).limit(slots.length).toList();
+        List<String> allClaims = store.borderClaimsOf(source).stream().filter(claimId -> !claimId.equals(source.capitalClaim)).toList();
+        int pageCount = Math.max(1, (allClaims.size() + slots.length - 1) / slots.length);
+        int selectedPage = demands ? Math.min(this.demandPage, pageCount - 1) : Math.min(this.offerPage, pageCount - 1);
+        if (demands) {
+            this.demandPage = selectedPage;
+        } else {
+            this.offerPage = selectedPage;
+        }
+        List<String> claims = allClaims.stream().skip((long)selectedPage * slots.length).limit(slots.length).toList();
         if (claims.isEmpty()) {
             int slot = slots[5];
             String name = demands ? "No demandable border claims" : "No offerable border claims";
@@ -173,6 +184,24 @@ extends AbstractContainerMenu {
             }
             this.offeredClaimSlots[slot] = claimId2;
         }
+    }
+
+    private void drawPageControls() {
+        int demandPages = this.claimPageCount(this.otherNation);
+        int offerPages = this.claimPageCount(this.ownNation);
+        this.dealContainer.setItem(1, PeaceDealMenu.item(Items.ARROW, "Previous demands", List.of(Component.literal("Page " + (this.demandPage + 1) + "/" + demandPages))));
+        this.actions[1] = Action.DEMAND_PREV;
+        this.dealContainer.setItem(2, PeaceDealMenu.item(Items.ARROW, "Next demands", List.of(Component.literal("Page " + (this.demandPage + 1) + "/" + demandPages))));
+        this.actions[2] = Action.DEMAND_NEXT;
+        this.dealContainer.setItem(6, PeaceDealMenu.item(Items.ARROW, "Previous offers", List.of(Component.literal("Page " + (this.offerPage + 1) + "/" + offerPages))));
+        this.actions[6] = Action.OFFER_PREV;
+        this.dealContainer.setItem(7, PeaceDealMenu.item(Items.ARROW, "Next offers", List.of(Component.literal("Page " + (this.offerPage + 1) + "/" + offerPages))));
+        this.actions[7] = Action.OFFER_NEXT;
+    }
+
+    private int claimPageCount(NationStore.Nation nation) {
+        int claims = (int)NationStore.get().borderClaimsOf(nation).stream().filter(claimId -> !claimId.equals(nation.capitalClaim)).count();
+        return Math.max(1, (claims + DEMAND_SLOTS.length - 1) / DEMAND_SLOTS.length);
     }
 
     private void drawControls() {
@@ -226,7 +255,8 @@ extends AbstractContainerMenu {
     }
 
     private void handleAction(ServerPlayer player, Action action) {
-        if (this.viewingIncoming && action != Action.PRIMARY && action != Action.COUNTER_OR_CLEAR && action != Action.CLOSE) {
+        if (this.viewingIncoming && action != Action.PRIMARY && action != Action.COUNTER_OR_CLEAR && action != Action.CLOSE
+            && action != Action.DEMAND_PREV && action != Action.DEMAND_NEXT && action != Action.OFFER_PREV && action != Action.OFFER_NEXT) {
             player.sendSystemMessage((Component)Component.literal((String)"[NationWars] Click Make counteroffer before editing terms."));
             return;
         }
@@ -269,20 +299,47 @@ extends AbstractContainerMenu {
                 player.closeContainer();
                 return;
             }
+            case 8: {
+                this.demandPage = Math.max(0, this.demandPage - 1);
+                break;
+            }
+            case 9: {
+                this.demandPage = Math.min(this.claimPageCount(this.otherNation) - 1, this.demandPage + 1);
+                break;
+            }
+            case 10: {
+                this.offerPage = Math.max(0, this.offerPage - 1);
+                break;
+            }
+            case 11: {
+                this.offerPage = Math.min(this.claimPageCount(this.ownNation) - 1, this.offerPage + 1);
+                break;
+            }
         }
         this.refreshAndSync();
     }
 
     private void sendDeal(ServerPlayer player) {
         NationStore store = NationStore.get();
+        if (!store.isOwner(player.getUUID(), this.ownNation) || store.nationById(this.ownNation.id).isEmpty()) {
+            player.sendSystemMessage(Component.literal("[NationWars] Only the current nation owner can send this peace deal."));
+            player.closeContainer();
+            return;
+        }
         if (!(this.war.active && store.isWarParticipant(this.war, this.ownNation) && store.isWarParticipant(this.war, this.otherNation))) {
             player.sendSystemMessage((Component)Component.literal((String)"[NationWars] That war is no longer active."));
             player.closeContainer();
             return;
         }
+        NationStore.PeaceDeal existing = this.war.peaceDeal;
+        if (existing != null && !(this.ownNation.id.equals(existing.proposer) && this.otherNation.id.equals(existing.receiver)
+            || this.ownNation.id.equals(existing.receiver) && this.otherNation.id.equals(existing.proposer))) {
+            player.sendSystemMessage(Component.literal("[NationWars] Another pair in this multi-nation war already has a pending peace deal."));
+            return;
+        }
         long cooldownUntil = store.peaceCooldownUntil(this.ownNation, this.otherNation);
-        if (cooldownUntil > (long)player.getServer().getTickCount()) {
-            long secondsLeft = Math.max(1L, (cooldownUntil - (long)player.getServer().getTickCount()) / 20L);
+        if (cooldownUntil > NationStore.persistentNow()) {
+            long secondsLeft = Math.max(1L, (cooldownUntil - NationStore.persistentNow()) / 20L);
             player.sendSystemMessage((Component)Component.literal((String)("[NationWars] Your last peace offer was rejected. Try again in " + secondsLeft + " seconds.")));
             return;
         }
@@ -290,6 +347,10 @@ extends AbstractContainerMenu {
         sent.proposer = this.ownNation.id;
         sent.receiver = this.otherNation.id;
         double fee = this.peaceOfferFee();
+        if (store.isSpendingBlocked(this.ownNation, NationStore.persistentNow())) {
+            player.sendSystemMessage(Component.literal("[NationWars] Your capital is infiltrated; treasury spending is currently blocked."));
+            return;
+        }
         if (this.ownNation.balance + 1.0E-4 < fee) {
             player.sendSystemMessage((Component)Component.literal((String)("[NationWars] Nation treasury needs $" + NationStore.roundMoney(fee) + " to send this peace deal.")));
             return;
@@ -303,6 +364,11 @@ extends AbstractContainerMenu {
 
     private void acceptDeal(ServerPlayer player) {
         NationStore store = NationStore.get();
+        if (!store.isOwner(player.getUUID(), this.ownNation) || store.nationById(this.ownNation.id).isEmpty()) {
+            player.sendSystemMessage(Component.literal("[NationWars] Only the current nation owner can accept this peace deal."));
+            player.closeContainer();
+            return;
+        }
         NationStore.PeaceDeal pending = this.war.peaceDeal;
         if (pending == null || !this.ownNation.id.equals(pending.receiver)) {
             player.sendSystemMessage((Component)Component.literal((String)"[NationWars] That peace deal is no longer available."));
@@ -423,7 +489,11 @@ extends AbstractContainerMenu {
         RETURN_CAPTURED,
         COUNTER_OR_CLEAR,
         PRIMARY,
-        CLOSE;
+        CLOSE,
+        DEMAND_PREV,
+        DEMAND_NEXT,
+        OFFER_PREV,
+        OFFER_NEXT;
 
     }
 

@@ -79,6 +79,7 @@ import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -100,6 +101,7 @@ import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BarrelBlock;
+import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.CropBlock;
@@ -113,6 +115,7 @@ import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.ExplosionEvent;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
@@ -144,6 +147,8 @@ public final class NationEvents {
     private static final Map<String, Long> ACCESS_COOLDOWNS = new HashMap<String, Long>();
     private static final Map<String, Long> BUILD_REWARD_COOLDOWNS = new HashMap<String, Long>();
     private static final Map<UUID, Long> OPAC_FULL_PASSES = new HashMap<UUID, Long>();
+    private static final Set<UUID> WAR_DEATHS = new java.util.HashSet<UUID>();
+    private static final Map<UUID, Long> WAR_RESPAWN_LOCKS = new HashMap<UUID, Long>();
 
     private NationEvents() {
     }
@@ -152,7 +157,9 @@ public final class NationEvents {
     public static void serverStarted(ServerStartedEvent event) {
         NationWarsConfig.load();
         OpacClaimsBridge.forceMaxPlayerClaimsZero();
+        OpacClaimsBridge.activatePrimaryPartySystem(event.getServer());
         NationStore.load(event.getServer());
+        NationEvents.refreshAllTabListNames(event.getServer());
         long tick = event.getServer().getTickCount();
         nextIncomeTick = tick + 1200L;
         nextMaintenanceTick = tick + 12000L;
@@ -167,6 +174,8 @@ public final class NationEvents {
         CAPTURE_PROGRESS.clear();
         ACCESS_COOLDOWNS.clear();
         BUILD_REWARD_COOLDOWNS.clear();
+        WAR_DEATHS.clear();
+        WAR_RESPAWN_LOCKS.clear();
         nextOpacSyncTick = -1L;
         opacSyncRetries = 0;
     }
@@ -194,7 +203,6 @@ public final class NationEvents {
             nextMaintenanceTick = tick + 12000L;
         }
         NationEvents.decayCaptureProgress(server, tick);
-        NationEvents.completeSpyMissions(server, tick);
         NationEvents.cleanupCooldowns(server, tick);
     }
 
@@ -205,6 +213,7 @@ public final class NationEvents {
             return;
         }
         ServerPlayer player2 = (ServerPlayer)player;
+        NationStore.get().updatePlayerIdentity(player2);
         long tick = player2.getServer().getTickCount();
         if (opacSyncRetries <= 0) {
             NationEvents.scheduleOpacSync(tick + 40L, 1);
@@ -215,6 +224,24 @@ public final class NationEvents {
     }
 
     @SubscribeEvent
+    public static void playerDeath(LivingDeathEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) {
+            return;
+        }
+        NationStore store = NationStore.get();
+        store.nationOf(player.getUUID()).filter(nation -> !store.activeWarsOf(nation).isEmpty()).ifPresent(nation -> WAR_DEATHS.add(player.getUUID()));
+    }
+
+    @SubscribeEvent
+    public static void playerRespawned(PlayerEvent.PlayerRespawnEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player) || !WAR_DEATHS.remove(player.getUUID())) {
+            return;
+        }
+        WAR_RESPAWN_LOCKS.put(player.getUUID(), (long)player.getServer().getTickCount() + 400L);
+        player.sendSystemMessage(Component.literal("[NationWars] War capture attack and defense are disabled for 20 seconds after respawning."));
+    }
+
+    @SubscribeEvent(priority=EventPriority.LOWEST)
     public static void tabListName(PlayerEvent.TabListNameFormat event) {
         Player player = event.getEntity();
         if (!(player instanceof ServerPlayer)) {
@@ -224,13 +251,21 @@ public final class NationEvents {
         try {
             Optional<NationStore.Nation> nation = NationStore.get().nationOf(player2.getUUID());
             if (nation.isPresent()) {
-                event.setDisplayName((Component)Component.literal((String)("[" + nation.get().name + "] ")).withStyle(ChatFormatting.GOLD).append((Component)Component.literal((String)player2.getGameProfile().getName()).withStyle(ChatFormatting.WHITE)));
+                MutableComponent prefix = Component.literal((String)("[" + nation.get().name + "] ")).withStyle(ChatFormatting.GOLD);
+                event.setDisplayName((Component)prefix.append((Component)Component.literal((String)player2.getGameProfile().getName()).withStyle(ChatFormatting.WHITE)));
             } else {
-                event.setDisplayName((Component)Component.literal((String)"[No Nation] ").withStyle(ChatFormatting.DARK_GRAY).append((Component)Component.literal((String)player2.getGameProfile().getName()).withStyle(ChatFormatting.GRAY)));
+                MutableComponent prefix = Component.literal((String)"[No Nation] ").withStyle(ChatFormatting.DARK_GRAY);
+                event.setDisplayName((Component)prefix.append((Component)Component.literal((String)player2.getGameProfile().getName()).withStyle(ChatFormatting.GRAY)));
             }
         }
         catch (IllegalStateException ignored) {
-            event.setDisplayName(null);
+            // Keep the vanilla display name while the Nation Wars store is unavailable.
+        }
+    }
+
+    public static void refreshAllTabListNames(MinecraftServer server) {
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            player.refreshTabListName();
         }
     }
 
@@ -239,10 +274,15 @@ public final class NationEvents {
         ServerPlayer player;
         block5: {
             block4: {
-                Player player2 = event.getEntity();
-                if (!(player2 instanceof ServerPlayer)) break block4;
-                player = (ServerPlayer)player2;
-                if (player.tickCount % 20 == 0) break block5;
+        Player player2 = event.getEntity();
+        if (!(player2 instanceof ServerPlayer)) break block4;
+        player = (ServerPlayer)player2;
+        long tick = player.getServer().getTickCount();
+        ClaimKey currentClaim = ClaimKey.of(player.serverLevel(), player.chunkPosition());
+        if (NationStore.get().isRaidActive(currentClaim.id(), NationStore.persistentNow())) {
+            NationEvents.grantTemporaryOpacPass(player, tick + 2L);
+        }
+        if (player.tickCount % 20 == 0) break block5;
             }
             return;
         }
@@ -260,6 +300,11 @@ public final class NationEvents {
             return;
         }
         ServerPlayer player2 = (ServerPlayer)player;
+        if (event.getState().getBlock() instanceof BedBlock && NationEvents.isEnemyWarClaim(player2, player2.serverLevel(), event.getPos())) {
+            event.setCanceled(true);
+            player2.displayClientMessage(Component.literal("Enemy beds are invincible during war."), true);
+            return;
+        }
         NationEvents.grantClaimActionPassIfNeeded(player2, event.getPos(), player2.getServer().getTickCount());
     }
 
@@ -304,7 +349,7 @@ public final class NationEvents {
         }
         ServerPlayer player = (ServerPlayer)livingEntity;
         long tick = player.getServer().getTickCount();
-        boolean removedBlockedClaimBlock = event.getAffectedBlocks().removeIf(pos -> !NationEvents.canExplosionAffect(player, level2, pos));
+        boolean removedBlockedClaimBlock = event.getAffectedBlocks().removeIf(pos -> level2.getBlockState(pos).getBlock() instanceof BedBlock && NationEvents.isEnemyWarClaim(player, level2, pos) || !NationEvents.canExplosionAffect(player, level2, pos));
         if (!event.getAffectedBlocks().isEmpty() || removedBlockedClaimBlock) {
             NationEvents.grantActionOpacPass(player, tick);
         }
@@ -364,7 +409,15 @@ public final class NationEvents {
         if (owner.isEmpty() || store.isMember(player2.getUUID(), owner.get())) {
             return;
         }
+        if (store.isRaidActive(claim.id(), NationStore.persistentNow())) {
+            NationEvents.grantActionOpacPass(player2, tick);
+            return;
+        }
         if (NationEvents.isActiveWarClaim(player2, owner.get())) {
+            if (NationEvents.isWarRespawnLocked(player2, tick)) {
+                player2.displayClientMessage(Component.literal("War actions unlock after your respawn timer."), true);
+                return;
+            }
             NationEvents.grantActionOpacPass(player2, tick);
             return;
         }
@@ -399,18 +452,19 @@ public final class NationEvents {
 
     private static double passiveIncomePerMinute(NationStore store, NationStore.Nation nation) {
         double income = 0.0;
-        if (nation.doctrine().capitalProducesIncome && nation.capitalClaim != null && !nation.capitalClaim.isBlank()) {
+        long tick = NationStore.persistentNow();
+        if (nation.doctrine().capitalProducesIncome && nation.capitalClaim != null && !nation.capitalClaim.isBlank() && !store.isClaimParalyzed(nation.capitalClaim, tick)) {
             income += 12.0;
         }
         List<String> ownedClaims = store.claimsOf(nation);
         if (nation.doctrine() == Doctrine.BRITISH) {
             for (String claimId : ownedClaims) {
-                if (claimId.equals(nation.capitalClaim) || !NationEvents.isCoastOrRiverClaim(store.server(), claimId)) continue;
+                if (claimId.equals(nation.capitalClaim) || store.isClaimParalyzed(claimId, tick) || !NationEvents.isCoastOrRiverClaim(store.server(), claimId)) continue;
                 income += 6.0;
             }
         }
         for (String cityClaim : nation.cityClaims) {
-            if (!ownedClaims.contains(cityClaim)) continue;
+            if (!ownedClaims.contains(cityClaim) || store.isClaimParalyzed(cityClaim, tick)) continue;
             income += 6.0;
         }
         return NationStore.roundMoney(income * nation.doctrine().incomeMultiplier);
@@ -478,6 +532,13 @@ public final class NationEvents {
     private static void handleCaptureTick(ServerPlayer player) {
         int required;
         NationStore store = NationStore.get();
+        long tick = player.getServer().getTickCount();
+        if (NationEvents.isWarRespawnLocked(player, tick)) {
+            NationEvents.clearCapture(player);
+            long seconds = Math.max(1L, (WAR_RESPAWN_LOCKS.get(player.getUUID()) - tick + 19L) / 20L);
+            player.displayClientMessage(Component.literal("War capture lock: " + seconds + "s"), true);
+            return;
+        }
         Optional<NationStore.Nation> attacker = store.nationOf(player.getUUID());
         if (attacker.isEmpty()) {
             NationEvents.clearCapture(player);
@@ -501,16 +562,16 @@ public final class NationEvents {
             NationEvents.removeCapture(progressKey);
             return;
         }
-        if (NationEvents.defenderPresent(player, defender.get())) {
+        if (NationEvents.defenderPresent(player, maybeWar.get(), defender.get())) {
             int required2;
             progress.requiredSeconds = required2 = NationEvents.requiredCaptureSeconds(player, attacker.get(), defender.get(), maybeWar.get(), claim);
-            NationEvents.updateCaptureBar(player.getServer(), player.getUUID(), progressKey, defender.get(), "Capture paused: " + claim.shortName(), progress.seconds, required2, BossEvent.BossBarColor.YELLOW);
+            NationEvents.updateCaptureBar(player.getServer(), player.getUUID(), progressKey, defender.get(), attacker.get().name + " vs " + defender.get().name + " — capture paused at " + claim.shortName(), progress.seconds, required2, BossEvent.BossBarColor.YELLOW);
             return;
         }
         NationStore.War war = maybeWar.get();
         ++progress.seconds;
         progress.requiredSeconds = required = NationEvents.requiredCaptureSeconds(player, attacker.get(), defender.get(), war, claim);
-        NationEvents.updateCaptureBar(player.getServer(), player.getUUID(), progressKey, defender.get(), "Capturing " + claim.shortName() + " from " + defender.get().name, progress.seconds, required, BossEvent.BossBarColor.GREEN);
+        NationEvents.updateCaptureBar(player.getServer(), player.getUUID(), progressKey, defender.get(), attacker.get().name + " capturing " + defender.get().name + " — " + claim.shortName(), progress.seconds, required, BossEvent.BossBarColor.GREEN);
         if (progress.seconds >= required) {
             int capturingSide = store.sideOf(war, attacker.get());
             boolean capitalCaptured = claim.id().equals(defender.get().capitalClaim);
@@ -609,16 +670,21 @@ public final class NationEvents {
         ChunkPos chunk = reference.chunkPosition();
         for (ServerPlayer other : reference.getServer().getPlayerList().getPlayers()) {
             Optional<NationStore.Nation> otherNation = store.nationOf(other.getUUID());
-            if (!other.level().dimension().equals(reference.level().dimension()) || !other.chunkPosition().equals((Object)chunk) || !otherNation.isPresent() || store.sideOf(war, otherNation.get()) != attackerSide) continue;
+            if (!other.level().dimension().equals(reference.level().dimension()) || !other.chunkPosition().equals((Object)chunk) || NationEvents.isWarRespawnLocked(other, other.getServer().getTickCount()) || !otherNation.isPresent() || store.sideOf(war, otherNation.get()) != attackerSide) continue;
             ++count;
         }
         return count;
     }
 
-    private static boolean defenderPresent(ServerPlayer attacker, NationStore.Nation defender) {
+    private static boolean defenderPresent(ServerPlayer attacker, NationStore.War war, NationStore.Nation defender) {
+        NationStore store = NationStore.get();
+        int defendingSide = store.sideOf(war, defender);
         ChunkPos attackerChunk = attacker.chunkPosition();
         for (ServerPlayer other : attacker.getServer().getPlayerList().getPlayers()) {
-            if (other == attacker || !other.level().dimension().equals(attacker.level().dimension()) || !other.chunkPosition().equals((Object)attackerChunk) || !NationStore.get().isMember(other.getUUID(), defender)) continue;
+            Optional<NationStore.Nation> otherNation = store.nationOf(other.getUUID());
+            if (other == attacker || !other.level().dimension().equals(attacker.level().dimension()) || !other.chunkPosition().equals((Object)attackerChunk)
+                || NationEvents.isWarRespawnLocked(other, other.getServer().getTickCount()) || otherNation.isEmpty()
+                || store.sideOf(war, otherNation.get()) != defendingSide) continue;
             return true;
         }
         return false;
@@ -658,7 +724,7 @@ public final class NationEvents {
                 NationEvents.removeCaptureBar(entry.getKey());
                 continue;
             }
-            NationEvents.updateCaptureBar(server, null, entry.getKey(), defender, "Capture draining: " + claim.shortName(), progress.seconds, Math.max(1, progress.requiredSeconds), BossEvent.BossBarColor.RED);
+            NationEvents.updateCaptureBar(server, null, entry.getKey(), defender, attacker.name + " vs " + defender.name + " — capture draining at " + claim.shortName(), progress.seconds, Math.max(1, progress.requiredSeconds), BossEvent.BossBarColor.RED);
         }
     }
 
@@ -772,36 +838,6 @@ public final class NationEvents {
         }
     }
 
-    private static void completeSpyMissions(MinecraftServer server, long tick) {
-        if (tick % 20L != 0L) {
-            return;
-        }
-        NationStore store = NationStore.get();
-        for (NationStore.SpyMission mission : store.dueSpyMissions(tick)) {
-            UUID spyId;
-            try {
-                spyId = UUID.fromString(mission.spyPlayer);
-            }
-            catch (IllegalArgumentException exception) {
-                store.removeSpyMission(mission);
-                continue;
-            }
-            ServerPlayer spy = server.getPlayerList().getPlayer(spyId);
-            if (spy == null) continue;
-            NationStore.Nation target = store.nationById(mission.target).orElse(null);
-            if (target == null) {
-                store.removeSpyMission(mission);
-                continue;
-            }
-            spy.sendSystemMessage((Component)Component.literal((String)("[NationWars] Spy report on " + target.name + ":")));
-            spy.sendSystemMessage((Component)Component.literal((String)("Doctrine: " + target.doctrine().displayName + " (" + target.doctrine().ideology.displayName + ")")));
-            spy.sendSystemMessage((Component)Component.literal((String)("Treasury: $" + NationStore.roundMoney(target.balance))));
-            spy.sendSystemMessage((Component)Component.literal((String)("Members: " + target.members.size())));
-            spy.sendSystemMessage((Component)Component.literal((String)("Claims: " + store.claimCount(target))));
-            store.removeSpyMission(mission);
-        }
-    }
-
     private static double rewardForBrokenBlock(ServerPlayer player, BlockState state) {
         CropBlock crop;
         Block block = state.getBlock();
@@ -877,7 +913,9 @@ public final class NationEvents {
     }
 
     private static boolean isCoreClaim(NationStore store, NationStore.Nation nation, String claimId) {
-        return nation.id.equals(store.nationOwning(ClaimKey.parse(claimId)).map(owner -> owner.id).orElse("")) && !store.isCapturedClaimHeldBy(nation, claimId);
+        return nation.coreClaims.contains(claimId)
+            && nation.id.equals(store.nationOwning(ClaimKey.parse(claimId)).map(owner -> owner.id).orElse(""))
+            && !store.isCapturedClaimHeldBy(nation, claimId);
     }
 
     private static double incomeMultiplier(ServerPlayer player) {
@@ -907,11 +945,15 @@ public final class NationEvents {
         if (owner.isEmpty()) {
             return false;
         }
+        if (store.isRaidActive(claim.id(), NationStore.persistentNow())) {
+            NationEvents.grantActionOpacPass(player, tick);
+            return false;
+        }
         if (store.isMember(player.getUUID(), owner.get())) {
             NationEvents.grantActionOpacPass(player, tick);
             return false;
         }
-        if (NationEvents.isActiveWarClaim(player, owner.get())) {
+        if (NationEvents.isActiveWarClaim(player, owner.get()) && !NationEvents.isWarRespawnLocked(player, tick)) {
             NationEvents.grantActionOpacPass(player, tick);
             return false;
         }
@@ -921,16 +963,17 @@ public final class NationEvents {
 
     private static void grantClaimActionPassIfNeeded(ServerPlayer player, BlockPos pos, long tick) {
         NationStore store = NationStore.get();
-        Optional<NationStore.Nation> own = store.nationOf(player.getUUID());
-        if (own.isEmpty()) {
-            return;
-        }
         ClaimKey claim = ClaimKey.of(player.serverLevel(), new ChunkPos(pos));
         Optional<NationStore.Nation> owner = store.nationOwning(claim);
         if (owner.isEmpty()) {
             return;
         }
-        if (store.isMember(player.getUUID(), owner.get()) || store.activeWarForCapture(own.get(), owner.get()).isPresent()) {
+        if (store.isRaidActive(claim.id(), NationStore.persistentNow()) || store.isMember(player.getUUID(), owner.get())) {
+            NationEvents.grantActionOpacPass(player, tick);
+            return;
+        }
+        Optional<NationStore.Nation> own = store.nationOf(player.getUUID());
+        if (own.isPresent() && store.activeWarForCapture(own.get(), owner.get()).isPresent() && !NationEvents.isWarRespawnLocked(player, tick)) {
             NationEvents.grantActionOpacPass(player, tick);
         }
     }
@@ -943,10 +986,13 @@ public final class NationEvents {
         if (owner.isEmpty()) {
             return true;
         }
+        if (store.isRaidActive(claim.id(), NationStore.persistentNow())) {
+            return true;
+        }
         if (own.isEmpty()) {
             return false;
         }
-        return store.isMember(player.getUUID(), owner.get()) || store.activeWarForCapture(own.get(), owner.get()).isPresent();
+        return store.isMember(player.getUUID(), owner.get()) || store.activeWarForCapture(own.get(), owner.get()).isPresent() && !NationEvents.isWarRespawnLocked(player, player.getServer().getTickCount());
     }
 
     private static boolean isActiveWarClaim(ServerPlayer player, NationStore.Nation owner) {
@@ -1010,9 +1056,7 @@ public final class NationEvents {
         store.notifyNation(server, conqueror, (Component)Component.literal((String)("[NationWars] " + defeated.name + " lost all territory and was eliminated.")));
         store.endWar(war);
         store.deleteNation(defeated);
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            player.refreshTabListName();
-        }
+        NationEvents.refreshAllTabListNames(server);
     }
 
     private static void scheduleOpacSync(long tick, int retries) {
@@ -1033,6 +1077,18 @@ public final class NationEvents {
         NationEvents.removeExpired(ACCESS_COOLDOWNS, tick);
         NationEvents.removeExpired(BUILD_REWARD_COOLDOWNS, tick);
         NationEvents.removeExpiredOpacPasses(server, tick);
+        WAR_RESPAWN_LOCKS.entrySet().removeIf(entry -> entry.getValue() <= tick);
+    }
+
+    private static boolean isWarRespawnLocked(ServerPlayer player, long tick) {
+        return WAR_RESPAWN_LOCKS.getOrDefault(player.getUUID(), 0L) > tick;
+    }
+
+    private static boolean isEnemyWarClaim(ServerPlayer player, ServerLevel level, BlockPos pos) {
+        NationStore store = NationStore.get();
+        NationStore.Nation own = store.nationOf(player.getUUID()).orElse(null);
+        NationStore.Nation owner = store.nationOwning(ClaimKey.of(level, new ChunkPos(pos))).orElse(null);
+        return own != null && owner != null && !own.id.equals(owner.id) && store.activeWarForCapture(own, owner).isPresent();
     }
 
     private static void removeExpired(Map<String, Long> map, long tick) {

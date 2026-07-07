@@ -50,10 +50,12 @@ public final class WarMenu
 extends AbstractContainerMenu {
     private static final int ROWS = 6;
     private static final int WAR_SLOTS = 54;
+    private static final int PAGE_SIZE = 36;
     private final Inventory playerInventory;
     private final SimpleContainer warContainer;
     private final String[] warIds = new String[54];
     private final String[] hints = new String[54];
+    private int page;
 
     public WarMenu(int containerId, Inventory playerInventory) {
         super(MenuType.GENERIC_9x6, containerId);
@@ -91,6 +93,16 @@ extends AbstractContainerMenu {
             if (player instanceof ServerPlayer) {
                 ServerPlayer serverPlayer = (ServerPlayer)player;
                 if (clickType == ClickType.PICKUP || clickType == ClickType.QUICK_MOVE) {
+                    if (slotIndex == 50 && this.page > 0) {
+                        --this.page;
+                        this.refreshAndSync();
+                        return;
+                    }
+                    if (slotIndex == 53 && this.page + 1 < this.pageCount()) {
+                        ++this.page;
+                        this.refreshAndSync();
+                        return;
+                    }
                     this.sendDetailsOrHint(serverPlayer, slotIndex);
                 }
             }
@@ -113,9 +125,10 @@ extends AbstractContainerMenu {
         NationStore store = NationStore.get();
         MinecraftServer server = this.playerInventory.player.getServer();
         List<NationStore.War> wars = store.wars().stream().sorted(Comparator.comparing(war -> war.id)).toList();
+        int pageCount = this.pageCount();
+        this.page = Math.min(this.page, pageCount - 1);
         int slot = 0;
-        for (NationStore.War war2 : wars) {
-            if (slot >= 36) break;
+        for (NationStore.War war2 : wars.stream().skip((long)this.page * PAGE_SIZE).limit(PAGE_SIZE).toList()) {
             this.warIds[slot] = war2.id;
             this.warContainer.setItem(slot, this.displayWar(store, server, war2));
             ++slot;
@@ -131,6 +144,23 @@ extends AbstractContainerMenu {
         this.setHint(47, Items.SHIELD.getDefaultInstance(), "Join or defend", "/war join <nation> | /war defend <nation>");
         this.setHint(48, Items.WHITE_BANNER.getDefaultInstance(), "Peace deal", "/peace <nation>");
         this.setHint(49, Items.RED_BANNER.getDefaultInstance(), "Surrender", "/surrender <nation>");
+        if (this.page > 0) {
+            this.warContainer.setItem(50, control(Items.ARROW.getDefaultInstance(), "Previous wars"));
+        }
+        this.warContainer.setItem(51, control(Items.WRITABLE_BOOK.getDefaultInstance(), "Wars page " + (this.page + 1) + "/" + pageCount));
+        if (this.page + 1 < pageCount) {
+            this.warContainer.setItem(53, control(Items.ARROW.getDefaultInstance(), "Next wars"));
+        }
+    }
+
+    private int pageCount() {
+        int count = NationStore.get().wars().size();
+        return Math.max(1, (count + PAGE_SIZE - 1) / PAGE_SIZE);
+    }
+
+    private static ItemStack control(ItemStack stack, String name) {
+        stack.set(DataComponents.CUSTOM_NAME, Component.literal(name));
+        return stack;
     }
 
     private ItemStack displayWar(NationStore store, MinecraftServer server, NationStore.War war) {
@@ -153,7 +183,7 @@ extends AbstractContainerMenu {
         } else if (war.pendingDefenderResponse) {
             lore.add(Component.literal((String)"Status: waiting for defender response"));
         } else {
-            long secondsLeft = Math.max(0L, (war.justificationCompleteTick - (long)server.getTickCount()) / 20L);
+            long secondsLeft = Math.max(0L, (war.justificationCompleteTick - NationStore.persistentNow()) / 20L);
             lore.add(Component.literal((String)"Status: justifying"));
             lore.add(Component.literal((String)("Ready in: " + secondsLeft + "s")));
         }

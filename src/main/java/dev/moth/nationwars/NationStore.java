@@ -32,6 +32,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileAttribute;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -81,16 +82,35 @@ public final class NationStore {
 
     public static void load(MinecraftServer server) {
         Path file = server.getWorldPath(LevelResource.ROOT).resolve("data").resolve("nationwars.json");
+        Path backup = file.resolveSibling(file.getFileName() + ".bak");
         State state = new State();
+        boolean loaded = false;
         if (Files.exists(file, new LinkOption[0])) {
             try (BufferedReader reader = Files.newBufferedReader(file);){
-                State loaded = (State)GSON.fromJson((Reader)reader, State.class);
-                if (loaded != null) {
-                    state = loaded;
+                State loadedState = (State)GSON.fromJson((Reader)reader, State.class);
+                if (loadedState == null) {
+                    throw new IOException("Nation Wars data file was empty");
                 }
+                state = loadedState;
+                loaded = true;
             }
             catch (IOException | RuntimeException exception) {
                 NationWars.LOGGER.error("Failed to load Nation Wars data from {}", (Object)file, (Object)exception);
+                preserveCorruptFile(file);
+            }
+        }
+        if (!loaded && Files.exists(backup, new LinkOption[0])) {
+            try (BufferedReader reader = Files.newBufferedReader(backup);){
+                State recovered = (State)GSON.fromJson((Reader)reader, State.class);
+                if (recovered == null) {
+                    throw new IOException("Nation Wars backup file was empty");
+                }
+                state = recovered;
+                loaded = true;
+                NationWars.LOGGER.warn("Recovered Nation Wars data from backup {}", (Object)backup);
+            }
+            catch (IOException | RuntimeException exception) {
+                NationWars.LOGGER.error("Failed to load Nation Wars backup from {}", (Object)backup, (Object)exception);
             }
         }
         current = new NationStore(server, file, state);
@@ -98,16 +118,50 @@ public final class NationStore {
         OpacClaimsBridge.syncAll(server, current);
     }
 
-    public void save() {
+    public synchronized void save() {
+        Path temporary = this.file.resolveSibling(this.file.getFileName() + ".tmp");
+        Path backup = this.file.resolveSibling(this.file.getFileName() + ".bak");
         try {
             Files.createDirectories(this.file.getParent(), new FileAttribute[0]);
-            try (BufferedWriter writer = Files.newBufferedWriter(this.file, new OpenOption[0]);){
+            try (BufferedWriter writer = Files.newBufferedWriter(temporary, new OpenOption[0]);){
                 GSON.toJson((Object)this.state, (Appendable)writer);
+            }
+            if (Files.exists(this.file, new LinkOption[0])) {
+                Files.copy(this.file, backup, StandardCopyOption.REPLACE_EXISTING);
+            }
+            try {
+                Files.move(temporary, this.file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            }
+            catch (java.nio.file.AtomicMoveNotSupportedException ignored) {
+                Files.move(temporary, this.file, StandardCopyOption.REPLACE_EXISTING);
             }
         }
         catch (IOException exception) {
             NationWars.LOGGER.error("Failed to save Nation Wars data to {}", (Object)this.file, (Object)exception);
         }
+        finally {
+            try {
+                Files.deleteIfExists(temporary);
+            }
+            catch (IOException exception) {
+                NationWars.LOGGER.warn("Could not remove temporary Nation Wars data file {}", (Object)temporary, (Object)exception);
+            }
+        }
+    }
+
+    private static void preserveCorruptFile(Path file) {
+        Path preserved = file.resolveSibling(file.getFileName() + ".corrupt-" + System.currentTimeMillis());
+        try {
+            Files.move(file, preserved, StandardCopyOption.REPLACE_EXISTING);
+            NationWars.LOGGER.error("Preserved unreadable Nation Wars data as {}", (Object)preserved);
+        }
+        catch (IOException exception) {
+            throw new IllegalStateException("Refusing to overwrite unreadable Nation Wars data at " + file, exception);
+        }
+    }
+
+    public static long persistentNow() {
+        return PersistentTime.now();
     }
 
     public Collection<Nation> nations() {
@@ -116,6 +170,20 @@ public final class NationStore {
 
     public MinecraftServer server() {
         return this.server;
+    }
+
+    public void updatePlayerIdentity(ServerPlayer player) {
+        String playerId = player.getUUID().toString();
+        String currentName = player.getGameProfile().getName();
+        boolean changed = false;
+        for (Nation nation : this.state.nations.values()) {
+            if (!playerId.equals(nation.owner) || Objects.equals(currentName, nation.ownerName)) continue;
+            nation.ownerName = currentName;
+            changed = true;
+        }
+        if (changed) {
+            this.save();
+        }
     }
 
     public Optional<Nation> nationById(String id) {
@@ -131,11 +199,14 @@ public final class NationStore {
     }
 
     public boolean isDoctrineTaken(Doctrine doctrine) {
+        if (!this.server.getGameRules().getBoolean(NationWarsGameRules.LIMITED_DOCTRINES)) {
+            return false;
+        }
         return this.doctrineUseCount(doctrine) >= NationWarsConfig.get().doctrineLimit(doctrine);
     }
 
     public int doctrineUseCount(Doctrine doctrine) {
-        return (int)this.state.nations.values().stream().filter(nation -> doctrine.id.equals(nation.doctrine)).count();
+        return (int)this.state.nations.values().stream().filter(nation -> nation.doctrine() == doctrine).count();
     }
 
     public List<Doctrine> availableDoctrines() {
@@ -225,6 +296,7 @@ public final class NationStore {
         nation.freeClaimsRemaining = Math.max(0, doctrine.freeClaims - 1);
         nation.capitalClaim = capital.id();
         nation.members.add(nation.owner);
+        nation.coreClaims.add(capital.id());
         this.state.nations.put(key, nation);
         this.state.playerNation.put(nation.owner, key);
         this.state.claims.put(capital.id(), key);
@@ -271,7 +343,7 @@ public final class NationStore {
     }
 
     public boolean addCityClaim(Nation nation, String claimId, double cost) {
-        if (!nation.id.equals(this.state.claims.get(claimId)) || nation.cityClaims.contains(claimId) || nation.balance + 1.0E-4 < cost) {
+        if (!nation.id.equals(this.state.claims.get(claimId)) || nation.cityClaims.contains(claimId) || nation.balance + 1.0E-4 < cost || this.isSpendingBlocked(nation, NationStore.persistentNow())) {
             return false;
         }
         nation.balance = NationStore.roundMoney(nation.balance - cost);
@@ -347,6 +419,7 @@ public final class NationStore {
             return false;
         }
         this.state.claims.put(claim.id(), nation.id);
+        nation.coreClaims.add(claim.id());
         OpacClaimsBridge.mirrorClaim(this.server, nation, claim);
         this.save();
         return true;
@@ -362,6 +435,7 @@ public final class NationStore {
         this.state.claims.remove(claim.id());
         this.state.landPurchaseOffers.removeIf(offer -> claim.id().equals(offer.claimId));
         nation.cityClaims.remove(claim.id());
+        nation.coreClaims.remove(claim.id());
         OpacClaimsBridge.unmirrorClaim(this.server, nation, claim);
         this.save();
         return true;
@@ -379,11 +453,11 @@ public final class NationStore {
         } else {
             OpacClaimsBridge.mirrorClaim(this.server, newOwner, ClaimKey.parse(claimId));
         }
+        if (oldOwner != null && oldOwner.coreClaims.contains(claimId) && oldOwner.doctrine() == Doctrine.ROMANIAN) {
+            oldOwner.lostCoreTerritory = true;
+            this.notifyNation(this.server, oldOwner, Component.literal("[NationWars] Iron Guard penalty is active: losing a core claim raised maintenance costs by 0.1x."));
+        }
         if (oldOwner != null && claimId.equals(oldOwner.capitalClaim)) {
-            if (oldOwner.doctrine() == Doctrine.ROMANIAN) {
-                oldOwner.lostCoreTerritory = true;
-                this.notifyNation(this.server, oldOwner, (Component)Component.literal((String)"[NationWars] Iron Guard penalty is active: losing your core territory raised maintenance costs."));
-            }
             oldOwner.capitalClaim = this.claimsOf(oldOwner).stream().filter(id -> !id.equals(claimId)).findFirst().orElse("");
         }
         if (newOwner.capitalClaim == null || newOwner.capitalClaim.isBlank()) {
@@ -514,6 +588,19 @@ public final class NationStore {
         this.state.nations.remove(nation.id);
         this.state.playerNation.entrySet().removeIf(entry -> nation.id.equals(entry.getValue()));
         this.state.alliances.values().removeIf(alliance -> Objects.equals(alliance.leader, nation.id));
+        this.state.guarantees.remove(nation.id);
+        this.state.guarantees.values().forEach(guarantors -> guarantors.remove(nation.id));
+        this.state.guarantees.entrySet().removeIf(entry -> entry.getValue().isEmpty());
+        for (SpyMission mission : new ArrayList<>(this.state.spyMissions)) {
+            if (!nation.id.equals(mission.spyNation) && !nation.id.equals(mission.target)) {
+                continue;
+            }
+            if (!nation.id.equals(mission.spyNation)) {
+                this.resetSpyAfterCancelledMission(mission);
+            }
+            this.state.spyMissions.remove(mission);
+        }
+        this.state.spendingBlocks.remove(nation.id);
         for (Alliance alliance2 : this.state.alliances.values()) {
             alliance2.members.remove(nation.id);
             alliance2.invites.remove(nation.id);
@@ -540,6 +627,10 @@ public final class NationStore {
         this.state.claims.remove(removed);
         this.state.landPurchaseOffers.removeIf(offer -> removed.equals(offer.claimId));
         nation.cityClaims.remove(removed);
+        if (nation.coreClaims.contains(removed) && nation.doctrine() == Doctrine.ROMANIAN) {
+            nation.lostCoreTerritory = true;
+            this.notifyNation(this.server, nation, Component.literal("[NationWars] Iron Guard penalty is active: losing a core claim raised maintenance costs by 0.1x."));
+        }
         OpacClaimsBridge.unmirrorClaim(this.server, nation, ClaimKey.parse(removed));
         this.save();
         return true;
@@ -593,6 +684,10 @@ public final class NationStore {
         double demandedMoney = NationStore.roundMoney(Math.max(0.0, deal.demandedMoney));
         double offeredMoney = NationStore.roundMoney(Math.max(0.0, deal.offeredMoney));
         if (receiver.balance + 1.0E-4 < demandedMoney || proposer.balance + 1.0E-4 < offeredMoney) {
+            return false;
+        }
+        long tick = NationStore.persistentNow();
+        if ((demandedMoney > 0.0 && this.isSpendingBlocked(receiver, tick)) || (offeredMoney > 0.0 && this.isSpendingBlocked(proposer, tick))) {
             return false;
         }
         if (!this.claimsStillOwnedBy(deal.demandedClaims, receiver) || !this.claimsStillOwnedBy(deal.offeredClaims, proposer)) {
@@ -761,6 +856,32 @@ public final class NationStore {
         return this.capturedClaimsBy(war, first).size() + this.capturedClaimsBy(war, second).size();
     }
 
+    public int capturedClaimsHeldBySide(War war, int side) {
+        if (war == null || side == 0) {
+            return 0;
+        }
+        NationStore.ensureWarCaptureMap(war);
+        int count = 0;
+        for (Map.Entry<String, Set<String>> entry : war.capturedClaimsByNation.entrySet()) {
+            Nation captor = this.nationById(entry.getKey()).orElse(null);
+            if (captor == null || this.sideOf(war, captor) != side) {
+                continue;
+            }
+            for (String claimId : entry.getValue()) {
+                if (captor.id.equals(this.state.claims.get(claimId))) {
+                    ++count;
+                }
+            }
+        }
+        return count;
+    }
+
+    public int returnCapturedClaimsHeldBySide(War war, int side, Nation recipient) {
+        int count = this.capturedClaimsHeldBySide(war, side);
+        this.returnCapturedClaimsFromSide(war, side, recipient);
+        return count;
+    }
+
     private void returnCapturedClaimsForDeal(War war, Nation proposer, Nation receiver) {
         if (war == null || proposer == null || receiver == null || !this.areOpposingWarSides(war, proposer, receiver)) {
             return;
@@ -897,6 +1018,53 @@ public final class NationStore {
         return this.state.alliances.values();
     }
 
+    public Set<String> guarantorIdsOf(Nation target) {
+        if (target == null) {
+            return Set.of();
+        }
+        return Set.copyOf(this.state.guarantees.getOrDefault(target.id, Set.of()));
+    }
+
+    public List<Nation> guarantorsOf(Nation target) {
+        return this.guarantorIdsOf(target).stream().map(this.state.nations::get).filter(Objects::nonNull).sorted(Comparator.comparing(nation -> nation.name.toLowerCase(Locale.ROOT))).toList();
+    }
+
+    public boolean addGuarantee(Nation guarantor, Nation target) {
+        if (guarantor == null || target == null || guarantor.id.equals(target.id) || this.sameAlliance(guarantor, target)) {
+            return false;
+        }
+        boolean added = this.state.guarantees.computeIfAbsent(target.id, ignored -> new LinkedHashSet<>()).add(guarantor.id);
+        if (added) {
+            this.save();
+        }
+        return added;
+    }
+
+    public boolean removeGuarantee(Nation guarantor, Nation target) {
+        if (guarantor == null || target == null) {
+            return false;
+        }
+        Set<String> guarantors = this.state.guarantees.get(target.id);
+        boolean removed = guarantors != null && guarantors.remove(guarantor.id);
+        if (guarantors != null && guarantors.isEmpty()) {
+            this.state.guarantees.remove(target.id);
+        }
+        if (removed) {
+            this.save();
+        }
+        return removed;
+    }
+
+    public boolean addGuaranteedDefender(War war, Nation guarantor) {
+        if (war == null || guarantor == null || !war.active || this.sideOf(war, guarantor) != 0) {
+            return false;
+        }
+        war.defenderSide.add(guarantor.id);
+        war.joinRequests.remove(guarantor.id);
+        this.save();
+        return true;
+    }
+
     public Optional<Alliance> allianceByName(String name) {
         return Optional.ofNullable(this.state.alliances.get(NationStore.nationKey(name)));
     }
@@ -950,13 +1118,46 @@ public final class NationStore {
         return removed;
     }
 
-    public SpyMission createSpyMission(ServerPlayer spy, Nation spyNation, Nation target, long completeTick) {
+    public Optional<SpyAgency> spyAgency(Nation nation) {
+        return nation == null ? Optional.empty() : Optional.ofNullable(nation.spyAgency);
+    }
+
+    public SpyAgency createSpyAgency(Nation nation) {
+        if (nation.spyAgency == null) {
+            nation.spyAgency = new SpyAgency();
+            this.save();
+        }
+        return nation.spyAgency;
+    }
+
+    public SpyUnit hireSpy(Nation nation) {
+        SpyAgency agency = this.createSpyAgency(nation);
+        SpyUnit spy = new SpyUnit();
+        spy.id = agency.spies.stream().map(unit -> unit.id).max(Integer::compareTo).orElse(0) + 1;
+        agency.spies.add(spy);
+        this.save();
+        return spy;
+    }
+
+    public Optional<SpyUnit> spyUnit(Nation nation, int id) {
+        return this.spyAgency(nation).flatMap(agency -> agency.spies.stream().filter(spy -> spy.id == id).findFirst());
+    }
+
+    public List<SpyMission> spyMissionsFor(Nation nation) {
+        if (nation == null) {
+            return List.of();
+        }
+        return this.state.spyMissions.stream().filter(mission -> nation.id.equals(mission.spyNation)).sorted(Comparator.comparingInt(mission -> mission.id)).toList();
+    }
+
+    public SpyMission createSpyMission(Nation spyNation, Nation target, SpyUnit spy, String type, List<String> chunks, long completeTick) {
         SpyMission mission = new SpyMission();
         mission.id = this.state.nextSpyMissionId++;
-        mission.spyPlayer = spy.getUUID().toString();
-        mission.spyName = spy.getGameProfile().getName();
         mission.spyNation = spyNation.id;
         mission.target = target.id;
+        mission.spyId = spy.id;
+        mission.type = type;
+        mission.chunks = new ArrayList<>(chunks);
         mission.completeTick = completeTick;
         this.state.spyMissions.add(mission);
         this.save();
@@ -984,6 +1185,69 @@ public final class NationStore {
     public void removeSpyMission(SpyMission mission) {
         this.state.spyMissions.removeIf(existing -> existing.id == mission.id);
         this.save();
+    }
+
+    public SpyIntel spyIntel(Nation viewer, Nation target, boolean create) {
+        if (viewer == null || target == null || viewer.spyAgency == null) {
+            return null;
+        }
+        SpyIntel intel = viewer.spyAgency.intel.get(target.id);
+        if (intel == null && create) {
+            intel = new SpyIntel();
+            intel.target = target.id;
+            intel.name = target.name;
+            intel.known.add("name");
+            viewer.spyAgency.intel.put(target.id, intel);
+        }
+        return intel;
+    }
+
+    public boolean isClaimParalyzed(String claimId, long tick) {
+        return this.state.paralyzedClaims.getOrDefault(claimId, 0L) > tick;
+    }
+
+    public void paralyzeClaim(String claimId, long untilTick) {
+        this.state.paralyzedClaims.put(claimId, untilTick);
+        this.save();
+    }
+
+    public boolean isRaidActive(String claimId, long tick) {
+        return this.state.raidedClaims.getOrDefault(claimId, 0L) > tick;
+    }
+
+    public void raidClaim(String claimId, long untilTick) {
+        this.state.raidedClaims.put(claimId, untilTick);
+        this.save();
+    }
+
+    public boolean isCounterspyDisabled(String claimId, long tick) {
+        return this.state.disabledCounterspyClaims.getOrDefault(claimId, 0L) > tick;
+    }
+
+    public void disableCounterspy(String claimId, long untilTick) {
+        this.state.disabledCounterspyClaims.put(claimId, untilTick);
+        this.save();
+    }
+
+    public boolean isSpendingBlocked(Nation nation, long tick) {
+        return nation != null && this.state.spendingBlocks.getOrDefault(nation.id, 0L) > tick;
+    }
+
+    public long spendingBlockedUntil(Nation nation) {
+        return nation == null ? 0L : this.state.spendingBlocks.getOrDefault(nation.id, 0L);
+    }
+
+    public void blockSpending(Nation nation, long untilTick) {
+        this.state.spendingBlocks.put(nation.id, untilTick);
+        this.save();
+    }
+
+    public boolean clearExpiredSpyEffects(long tick) {
+        boolean changed = this.state.paralyzedClaims.entrySet().removeIf(entry -> entry.getValue() <= tick);
+        changed |= this.state.raidedClaims.entrySet().removeIf(entry -> entry.getValue() <= tick);
+        changed |= this.state.disabledCounterspyClaims.entrySet().removeIf(entry -> entry.getValue() <= tick);
+        changed |= this.state.spendingBlocks.entrySet().removeIf(entry -> entry.getValue() <= tick);
+        return changed;
     }
 
     public void notifyNation(MinecraftServer server, Nation nation, Component message) {
@@ -1056,13 +1320,55 @@ public final class NationStore {
         if (this.state.warDeclarationRejections == null) {
             this.state.warDeclarationRejections = new LinkedHashSet<String>();
         }
+        if (this.state.guarantees == null) {
+            this.state.guarantees = new LinkedHashMap<String, Set<String>>();
+        }
+        if (this.state.paralyzedClaims == null) {
+            this.state.paralyzedClaims = new LinkedHashMap<String, Long>();
+        }
+        if (this.state.raidedClaims == null) {
+            this.state.raidedClaims = new LinkedHashMap<String, Long>();
+        }
+        if (this.state.disabledCounterspyClaims == null) {
+            this.state.disabledCounterspyClaims = new LinkedHashMap<String, Long>();
+        }
+        if (this.state.spendingBlocks == null) {
+            this.state.spendingBlocks = new LinkedHashMap<String, Long>();
+        }
+        this.state.nations.entrySet().removeIf(entry -> entry.getKey() == null || entry.getKey().isBlank() || entry.getValue() == null);
+        this.state.players.entrySet().removeIf(entry -> entry.getKey() == null || entry.getKey().isBlank());
+        this.state.players.replaceAll((id, balance) -> balance == null || !Double.isFinite(balance) ? 0.0 : NationStore.roundMoney(Math.max(0.0, balance)));
+        this.state.wars.entrySet().removeIf(entry -> entry.getValue() == null
+            || !this.state.nations.containsKey(entry.getValue().attacker)
+            || !this.state.nations.containsKey(entry.getValue().defender));
+        this.state.alliances.entrySet().removeIf(entry -> entry.getValue() == null || !this.state.nations.containsKey(entry.getValue().leader));
+        this.state.marketListings.removeIf(listing -> listing == null || listing.id <= 0 || listing.seller == null || listing.itemTag == null || listing.itemTag.isBlank()
+            || !Double.isFinite(listing.price) || listing.price <= 0.0);
+        this.state.paralyzedClaims.replaceAll((id, tick) -> tick == null ? 0L : tick);
+        this.state.raidedClaims.replaceAll((id, tick) -> tick == null ? 0L : tick);
+        this.state.disabledCounterspyClaims.replaceAll((id, tick) -> tick == null ? 0L : tick);
+        this.state.spendingBlocks.replaceAll((id, tick) -> tick == null ? 0L : tick);
+        this.state.paralyzedClaims.replaceAll((id, tick) -> this.migrateDeadline(tick, 600L * 20L));
+        this.state.raidedClaims.replaceAll((id, tick) -> this.migrateDeadline(tick, 300L * 20L));
+        this.state.disabledCounterspyClaims.replaceAll((id, tick) -> this.migrateDeadline(tick, 600L * 20L));
+        this.state.spendingBlocks.replaceAll((id, tick) -> this.migrateDeadline(tick, 600L * 20L));
+        this.state.peaceCooldowns.replaceAll((id, tick) -> this.migrateDeadline(tick == null ? 0L : tick, 300L * 20L));
+        this.state.spyCooldowns.replaceAll((id, tick) -> this.migrateDeadline(tick == null ? 0L : tick, 300L * 20L));
+        this.state.paralyzedClaims.keySet().removeIf(id -> !NationStore.isValidClaimId(id));
+        this.state.raidedClaims.keySet().removeIf(id -> !NationStore.isValidClaimId(id));
+        this.state.disabledCounterspyClaims.keySet().removeIf(id -> !NationStore.isValidClaimId(id));
+        this.state.spendingBlocks.keySet().removeIf(id -> !this.state.nations.containsKey(id));
         this.state.claims.entrySet().removeIf(entry -> !this.state.nations.containsKey(entry.getValue()) || !NationStore.isValidClaimId((String)entry.getKey()));
         this.state.playerNation.entrySet().removeIf(entry -> !this.state.nations.containsKey(entry.getValue()));
-        if (this.state.nextSpyMissionId <= 0) {
-            this.state.nextSpyMissionId = this.state.spyMissions.stream().map(mission -> mission.id).max(Integer::compareTo).orElse(0) + 1;
-        }
+        this.state.guarantees.entrySet().removeIf(entry -> !this.state.nations.containsKey(entry.getKey()));
+        this.state.guarantees.replaceAll((id, guarantors) -> guarantors == null ? new LinkedHashSet<>() : guarantors);
+        this.state.guarantees.values().forEach(guarantors -> guarantors.removeIf(id -> !this.state.nations.containsKey(id)));
+        this.state.guarantees.entrySet().removeIf(entry -> entry.getValue().isEmpty());
+        this.state.nextSpyMissionId = Math.max(this.state.nextSpyMissionId,
+            this.state.spyMissions.stream().filter(Objects::nonNull).map(mission -> mission.id).max(Integer::compareTo).orElse(0) + 1);
         for (War war : this.state.wars.values()) {
             NationStore.ensureWarSides(war);
+            war.justificationCompleteTick = this.migrateDeadline(war.justificationCompleteTick, 120L * 20L);
             if (war.attackerCapturedClaims == null) {
                 war.attackerCapturedClaims = new LinkedHashSet<String>();
             }
@@ -1076,13 +1382,13 @@ public final class NationStore {
             if (war.peaceDeal == null) continue;
             NationStore.normalizePeaceDeal(war.peaceDeal);
         }
-        if (this.state.nextListingId <= 0) {
-            this.state.nextListingId = this.state.marketListings.stream().map(listing -> listing.id).max(Integer::compareTo).orElse(0) + 1;
-        }
+        this.state.nextListingId = Math.max(this.state.nextListingId,
+            this.state.marketListings.stream().map(listing -> listing.id).max(Integer::compareTo).orElse(0) + 1);
         this.state.landPurchaseOffers.removeIf(offer -> offer == null || !this.state.nations.containsKey(offer.buyer) || !this.state.nations.containsKey(offer.seller) || !NationStore.isValidClaimId(offer.claimId) || !offer.seller.equals(this.state.claims.get(offer.claimId)) || offer.price <= 0.0);
         int nextLandPurchaseOfferId = this.state.landPurchaseOffers.stream().map(offer -> offer.id).max(Integer::compareTo).orElse(0) + 1;
         this.state.nextLandPurchaseOfferId = Math.max(this.state.nextLandPurchaseOfferId, nextLandPurchaseOfferId);
         for (Nation nation : this.state.nations.values()) {
+            nation.doctrine = Doctrine.byId(nation.doctrine).orElse(Doctrine.AMERICAN).id;
             if (nation.members == null) {
                 nation.members = new LinkedHashSet<String>();
             }
@@ -1091,6 +1397,31 @@ public final class NationStore {
             }
             if (nation.usedSpecialWarLeaveIdeologies == null) {
                 nation.usedSpecialWarLeaveIdeologies = new LinkedHashSet<String>();
+            }
+            if (nation.coreClaims == null) {
+                nation.coreClaims = new LinkedHashSet<String>();
+                for (String claimId : this.claimsOf(nation)) {
+                    if (!this.isCapturedClaimHeldBy(nation, claimId)) {
+                        nation.coreClaims.add(claimId);
+                    }
+                }
+            }
+            nation.coreClaims.removeIf(claimId -> !NationStore.isValidClaimId(claimId));
+            if (nation.spyAgency != null) {
+                NationStore.normalizeSpyAgency(nation.spyAgency, this.state.nations);
+                for (SpyUnit spy : nation.spyAgency.spies) {
+                    long maximum = "counterspy".equals(spy.status) ? 900L * 20L
+                        : "traveling".equals(spy.status) || "recovering".equals(spy.status) ? 60L * 20L : 180L * 20L;
+                    spy.availableTick = this.migrateDeadline(spy.availableTick, maximum);
+                }
+                for (SpyIntel intel : nation.spyAgency.intel.values()) {
+                    if (intel.updatedTick > 0L && !PersistentTime.isPersistent(intel.updatedTick)) {
+                        intel.updatedTick = NationStore.persistentNow();
+                    }
+                }
+            }
+            if (nation.lastSpecialWarLeaveTick > 0L && !PersistentTime.isPersistent(nation.lastSpecialWarLeaveTick)) {
+                nation.lastSpecialWarLeaveTick = NationStore.persistentNow();
             }
             if (nation.ownerName == null || nation.ownerName.isBlank()) {
                 String string = nation.ownerName = nation.owner == null || nation.owner.length() < 8 ? "unknown" : nation.owner.substring(0, 8);
@@ -1115,6 +1446,80 @@ public final class NationStore {
             }
             if (alliance.leader == null || alliance.leader.isBlank()) continue;
             alliance.members.add(alliance.leader);
+        }
+        for (SpyMission mission : new ArrayList<>(this.state.spyMissions)) {
+            boolean invalid = mission == null
+                || mission.type == null
+                || mission.type.isBlank()
+                || !this.state.nations.containsKey(mission.spyNation)
+                || !this.state.nations.containsKey(mission.target)
+                || mission.spyId <= 0;
+            if (!invalid) {
+                continue;
+            }
+            if (mission != null) {
+                this.resetSpyAfterCancelledMission(mission);
+            }
+            this.state.spyMissions.remove(mission);
+        }
+        for (SpyMission mission : this.state.spyMissions) {
+            if (mission.chunks == null) {
+                mission.chunks = new ArrayList<String>();
+            }
+            mission.completeTick = this.migrateDeadline(mission.completeTick, 180L * 20L);
+        }
+    }
+
+    private long migrateDeadline(long value, long maximumRemainingTicks) {
+        return PersistentTime.migrateDeadline(value, this.server.getTickCount(), maximumRemainingTicks, NationStore.persistentNow());
+    }
+
+    private void resetSpyAfterCancelledMission(SpyMission mission) {
+        Nation spyNation = this.state.nations.get(mission.spyNation);
+        if (spyNation == null || spyNation.spyAgency == null) {
+            return;
+        }
+        spyNation.spyAgency.spies.stream().filter(spy -> spy.id == mission.spyId).findFirst().ifPresent(spy -> {
+            spy.status = "recovering";
+            spy.mission = "";
+            spy.targetChunk = "";
+            spy.availableTick = SpyRecovery.deadline(NationStore.persistentNow());
+        });
+    }
+
+    private static void normalizeSpyAgency(SpyAgency agency, Map<String, Nation> nations) {
+        if (agency.spies == null) {
+            agency.spies = new ArrayList<SpyUnit>();
+        }
+        if (agency.intel == null) {
+            agency.intel = new LinkedHashMap<String, SpyIntel>();
+        }
+        agency.spies.removeIf(Objects::isNull);
+        for (SpyUnit spy : agency.spies) {
+            if (spy.status == null || spy.status.isBlank()) {
+                spy.status = "idle";
+            }
+            if (spy.country == null) {
+                spy.country = "";
+            }
+            if (spy.mission == null) {
+                spy.mission = "";
+            }
+            if (spy.targetChunk == null) {
+                spy.targetChunk = "";
+            }
+            if ("idle".equals(spy.status) && !spy.country.isBlank() && nations.containsKey(spy.country)) {
+                spy.status = "stationed";
+                spy.availableTick = 0L;
+            }
+        }
+        agency.intel.entrySet().removeIf(entry -> !nations.containsKey(entry.getKey()) || entry.getValue() == null);
+        for (Map.Entry<String, SpyIntel> entry : agency.intel.entrySet()) {
+            SpyIntel intel = entry.getValue();
+            intel.target = entry.getKey();
+            if (intel.known == null) {
+                intel.known = new LinkedHashSet<String>();
+            }
         }
     }
 
@@ -1189,6 +1594,11 @@ public final class NationStore {
         public Map<String, Alliance> alliances = new LinkedHashMap<String, Alliance>();
         public Map<String, Long> spyCooldowns = new LinkedHashMap<String, Long>();
         public Map<String, Long> peaceCooldowns = new LinkedHashMap<String, Long>();
+        public Map<String, Set<String>> guarantees = new LinkedHashMap<String, Set<String>>();
+        public Map<String, Long> paralyzedClaims = new LinkedHashMap<String, Long>();
+        public Map<String, Long> raidedClaims = new LinkedHashMap<String, Long>();
+        public Map<String, Long> disabledCounterspyClaims = new LinkedHashMap<String, Long>();
+        public Map<String, Long> spendingBlocks = new LinkedHashMap<String, Long>();
         public Set<String> warDeclarationRejections = new LinkedHashSet<String>();
         public List<SpyMission> spyMissions = new ArrayList<SpyMission>();
         public List<MarketListing> marketListings = new ArrayList<MarketListing>();
@@ -1209,9 +1619,11 @@ public final class NationStore {
         public String capitalClaim;
         public Set<String> members;
         public Set<String> cityClaims;
+        public Set<String> coreClaims;
         public long lastSpecialWarLeaveTick;
         public Set<String> usedSpecialWarLeaveIdeologies;
         public boolean lostCoreTerritory;
+        public SpyAgency spyAgency;
 
         public Nation() {
             this.doctrine = Doctrine.AMERICAN.id;
@@ -1220,9 +1632,11 @@ public final class NationStore {
             this.capitalClaim = "";
             this.members = new LinkedHashSet<String>();
             this.cityClaims = new LinkedHashSet<String>();
+            this.coreClaims = new LinkedHashSet<String>();
             this.lastSpecialWarLeaveTick = -1L;
             this.usedSpecialWarLeaveIdeologies = new LinkedHashSet<String>();
             this.lostCoreTerritory = false;
+            this.spyAgency = null;
         }
 
         public Doctrine doctrine() {
@@ -1290,7 +1704,38 @@ public final class NationStore {
         public String spyName = "";
         public String spyNation = "";
         public String target = "";
+        public int spyId = 0;
+        public String type = "";
+        public List<String> chunks = new ArrayList<String>();
         public long completeTick = 0L;
     }
-}
 
+    public static final class SpyAgency {
+        public List<SpyUnit> spies = new ArrayList<SpyUnit>();
+        public Map<String, SpyIntel> intel = new LinkedHashMap<String, SpyIntel>();
+    }
+
+    public static final class SpyUnit {
+        public int id = 0;
+        public String country = "";
+        public String status = "idle";
+        public String mission = "";
+        public String targetChunk = "";
+        public long availableTick = 0L;
+    }
+
+    public static final class SpyIntel {
+        public String target = "";
+        public Set<String> known = new LinkedHashSet<String>();
+        public String name = "";
+        public String doctrine = "";
+        public String ideology = "";
+        public String balance = "";
+        public String capital = "";
+        public String size = "";
+        public String members = "";
+        public String faction = "";
+        public String guarantees = "";
+        public long updatedTick = 0L;
+    }
+}

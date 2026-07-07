@@ -30,6 +30,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -38,7 +39,9 @@ import xaero.pac.common.claims.player.api.IPlayerChunkClaimAPI;
 import xaero.pac.common.event.api.OPACServerAddonRegisterEvent;
 import xaero.pac.common.server.api.OpenPACServerAPI;
 import xaero.pac.common.server.claims.api.IServerClaimsManagerAPI;
-import xaero.pac.common.server.parties.system.api.IPlayerPartySystemAPI;
+import xaero.pac.common.server.config.ServerConfig;
+import xaero.pac.common.server.parties.system.api.v2.IPlayerPartySystemAPI;
+import xaero.pac.common.server.player.config.IPlayerConfigManager;
 import xaero.pac.common.server.player.config.api.v2.IPlayerConfigAPI;
 import xaero.pac.common.server.player.config.api.v2.PlayerConfigOptions;
 
@@ -46,6 +49,7 @@ public final class OpacClaimsBridge {
     private static final String PARTY_SYSTEM_ID = "nationwars";
     private static final Pattern MAX_PLAYER_CLAIMS = Pattern.compile("(?m)^(\\s*maxPlayerClaims\\s*=\\s*)\\d+\\s*$");
     private static final Pattern PRIMARY_PARTY_SYSTEM = Pattern.compile("(?m)^(\\s*primaryPartySystem\\s*=\\s*)\"[^\"]*\"\\s*$");
+    private static final Pattern PARTY_OWNED_CLAIMS = Pattern.compile("(?m)^(\\s*partyOwnedClaims\\s*=\\s*)(?:true|false)\\s*$");
 
     private OpacClaimsBridge() {
     }
@@ -66,6 +70,12 @@ public final class OpacClaimsBridge {
             if (NationWarsConfig.get().setOpenPacPrimaryPartySystem && (partyMatcher = PRIMARY_PARTY_SYSTEM.matcher(updated)).find()) {
                 updated = partyMatcher.replaceFirst(Matcher.quoteReplacement(partyMatcher.group(1) + "\"nationwars\""));
             }
+            if (NationWarsConfig.get().setOpenPacPrimaryPartySystem) {
+                Matcher partyOwnedMatcher = PARTY_OWNED_CLAIMS.matcher(updated);
+                if (partyOwnedMatcher.find()) {
+                    updated = partyOwnedMatcher.replaceFirst(Matcher.quoteReplacement(partyOwnedMatcher.group(1) + "true"));
+                }
+            }
             if (!updated.equals(text)) {
                 Files.writeString(config, (CharSequence)updated, new OpenOption[0]);
                 NationWars.LOGGER.info("Updated Open Parties and Claims Nation Wars settings in {}", (Object)config);
@@ -80,6 +90,27 @@ public final class OpacClaimsBridge {
     public static void registerPartySystem(OPACServerAddonRegisterEvent event) {
         event.getPartySystemManagerAPI().register(PARTY_SYSTEM_ID, (IPlayerPartySystemAPI)NationWarsPartySystem.INSTANCE);
         NationWars.LOGGER.info("Registered Nation Wars Open Parties and Claims party system.");
+    }
+
+    public static void activatePrimaryPartySystem(MinecraftServer server) {
+        if (!NationWarsConfig.get().setOpenPacPrimaryPartySystem) {
+            NationWars.LOGGER.info("Nation Wars OPAC primary party-system activation is disabled by configuration.");
+            return;
+        }
+        try {
+            ServerConfig.CONFIG.partyOwnedClaims.set(true);
+            Object manager = OpenPACServerAPI.get((MinecraftServer)server).getPlayerConfigManager();
+            if (manager instanceof IPlayerConfigManager) {
+                IPlayerConfigManager internalManager = (IPlayerConfigManager)manager;
+                internalManager.getPartySystemManager().updatePrimarySystem(PARTY_SYSTEM_ID);
+                NationWars.LOGGER.info("Activated Nation Wars as the Open Parties and Claims primary party system.");
+            } else {
+                NationWars.LOGGER.warn("Could not activate the Nation Wars OPAC party system without a restart.");
+            }
+        }
+        catch (RuntimeException exception) {
+            NationWars.LOGGER.warn("Could not activate the Nation Wars OPAC party system.", (Throwable)exception);
+        }
     }
 
     public static boolean canMirrorClaim(MinecraftServer server, ClaimKey claim, UUID opacOwner) {
@@ -128,13 +159,15 @@ public final class OpacClaimsBridge {
     }
 
     public static void syncAll(MinecraftServer server, NationStore store) {
+        for (NationStore.Nation nation : store.nations()) {
+            OpacClaimsBridge.syncClaimDisplayName(server, nation);
+        }
         for (Map.Entry<String, String> entry : store.claimOwnerEntries()) {
             try {
                 NationStore.Nation nation = store.nationById(entry.getValue()).orElse(null);
                 if (nation == null) continue;
                 ClaimKey claim = ClaimKey.parse(entry.getKey());
                 OpacClaimsBridge.removeLegacyMisplacedMirror(server, store, nation, claim);
-                OpacClaimsBridge.syncClaimDisplayName(server, nation);
                 OpacClaimsBridge.mirrorClaim(server, nation, claim);
             }
             catch (RuntimeException exception) {
@@ -147,7 +180,10 @@ public final class OpacClaimsBridge {
         try {
             IPlayerConfigAPI config = OpenPACServerAPI.get((MinecraftServer)server).getPlayerConfigManager().getLoadedConfig(OpacClaimsBridge.nationOwner(nation));
             if (config != null) {
-                config.tryToSet(PlayerConfigOptions.CLAIMS_NAME, nation.name);
+                IPlayerConfigAPI.SetResult result = config.tryToSet(PlayerConfigOptions.CLAIMS_NAME, nation.name);
+                if (result != IPlayerConfigAPI.SetResult.SUCCESS && result != IPlayerConfigAPI.SetResult.DEFAULTED) {
+                    NationWars.LOGGER.warn("Open Parties and Claims rejected display name '{}' for {}: {}", (Object)nation.name, (Object)nation.id, (Object)result);
+                }
             }
         }
         catch (RuntimeException exception) {
@@ -207,6 +243,34 @@ public final class OpacClaimsBridge {
 
         public boolean isPermittedToPartyClaim(UUID playerId) {
             return NationWarsPartySystem.store().flatMap(store -> store.nationOf(playerId)).isPresent();
+        }
+
+        public UUID getOwner(NationStore.Nation nation) {
+            return nation == null ? null : UUID.fromString(nation.owner);
+        }
+
+        public Component getName(NationStore.Nation nation) {
+            return nation == null ? Component.empty() : Component.literal((String)nation.name);
+        }
+
+        public int getMemberCount(NationStore.Nation nation) {
+            return nation == null || nation.members == null ? 0 : nation.members.size();
+        }
+
+        public boolean canEditPartyConfig(UUID playerId) {
+            return NationWarsPartySystem.store().flatMap(store -> store.nationOf(playerId)).map(nation -> nation.owner.equals(playerId.toString())).orElse(false);
+        }
+
+        public boolean canCreatePartyConfigGroups(UUID playerId) {
+            return this.canEditPartyConfig(playerId);
+        }
+
+        public boolean canIncludeGroupsInPartyConfigGroups(UUID playerId) {
+            return this.canEditPartyConfig(playerId);
+        }
+
+        public boolean canIncludePlayersInPartyConfigGroups(UUID playerId) {
+            return this.canEditPartyConfig(playerId);
         }
 
         private static Optional<NationStore> store() {

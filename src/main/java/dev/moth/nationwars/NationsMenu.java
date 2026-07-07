@@ -45,32 +45,33 @@ import net.minecraft.world.level.ItemLike;
 
 public final class NationsMenu
 extends AbstractContainerMenu {
-    private static final int ROWS = 3;
-    private static final int NATION_SLOTS = 27;
+    private static final int ROWS = 6;
+    private static final int NATION_SLOTS = 54;
+    private static final int PAGE_SIZE = 45;
     private final Inventory playerInventory;
     private final SimpleContainer nationsContainer;
-    private final String[] nationIds = new String[27];
+    private final String[] nationIds = new String[NATION_SLOTS];
+    private int page;
 
     public NationsMenu(int containerId, Inventory playerInventory) {
-        super(MenuType.GENERIC_9x3, containerId);
+        super(MenuType.GENERIC_9x6, containerId);
         int column;
         this.playerInventory = playerInventory;
-        this.nationsContainer = new SimpleContainer(27);
+        this.nationsContainer = new SimpleContainer(NATION_SLOTS);
         this.nationsContainer.startOpen(playerInventory.player);
         this.refreshNations();
-        for (int row = 0; row < 3; ++row) {
+        for (int row = 0; row < ROWS; ++row) {
             for (column = 0; column < 9; ++column) {
                 this.addSlot(new DisplaySlot((Container)this.nationsContainer, column + row * 9, 8 + column * 18, 18 + row * 18));
             }
         }
-        int inventoryOffset = -18;
         for (int row = 0; row < 3; ++row) {
             for (int column2 = 0; column2 < 9; ++column2) {
-                this.addSlot(new Slot((Container)playerInventory, column2 + row * 9 + 9, 8 + column2 * 18, 103 + row * 18 + inventoryOffset));
+                this.addSlot(new Slot((Container)playerInventory, column2 + row * 9 + 9, 8 + column2 * 18, 139 + row * 18));
             }
         }
         for (column = 0; column < 9; ++column) {
-            this.addSlot(new Slot((Container)playerInventory, column, 8 + column * 18, 161 + inventoryOffset));
+            this.addSlot(new Slot((Container)playerInventory, column, 8 + column * 18, 197));
         }
     }
 
@@ -83,10 +84,20 @@ extends AbstractContainerMenu {
     }
 
     public void clicked(int slotIndex, int button, ClickType clickType, Player player) {
-        if (slotIndex >= 0 && slotIndex < 27) {
+        if (slotIndex >= 0 && slotIndex < NATION_SLOTS) {
             if (player instanceof ServerPlayer) {
                 ServerPlayer serverPlayer = (ServerPlayer)player;
                 if (clickType == ClickType.PICKUP || clickType == ClickType.QUICK_MOVE) {
+                    if (slotIndex == 45 && this.page > 0) {
+                        --this.page;
+                        this.refreshAndSync();
+                        return;
+                    }
+                    if (slotIndex == 53 && this.page + 1 < this.pageCount()) {
+                        ++this.page;
+                        this.refreshAndSync();
+                        return;
+                    }
                     this.sendNationDetails(serverPlayer, slotIndex);
                 }
             }
@@ -110,17 +121,34 @@ extends AbstractContainerMenu {
             ItemStack empty = new ItemStack((ItemLike)Items.BARRIER);
             empty.set(DataComponents.CUSTOM_NAME, Component.literal((String)"No nations yet"));
             empty.set(DataComponents.LORE, new ItemLore(List.of(Component.literal((String)"Use /nation create to start one."))));
-            this.nationsContainer.setItem(13, empty);
+            this.nationsContainer.setItem(22, empty);
             return;
         }
-        int slot = 10;
-        for (NationStore.Nation nation : nations) {
-            if (slot >= 27) break;
+        int pageCount = this.pageCount();
+        this.page = Math.min(this.page, pageCount - 1);
+        int slot = 0;
+        for (NationStore.Nation nation : nations.stream().skip((long)this.page * PAGE_SIZE).limit(PAGE_SIZE).toList()) {
             this.nationIds[slot] = nation.id;
             this.nationsContainer.setItem(slot, this.displayStack(nation));
-            if ((slot += 2) != 18) continue;
-            slot = 19;
+            ++slot;
         }
+        if (this.page > 0) {
+            this.nationsContainer.setItem(45, control(Items.ARROW.getDefaultInstance(), "Previous page"));
+        }
+        this.nationsContainer.setItem(49, control(Items.WRITABLE_BOOK.getDefaultInstance(), "Nations page " + (this.page + 1) + "/" + pageCount));
+        if (this.page + 1 < pageCount) {
+            this.nationsContainer.setItem(53, control(Items.ARROW.getDefaultInstance(), "Next page"));
+        }
+    }
+
+    private int pageCount() {
+        int count = NationStore.get().nationsSorted().size();
+        return Math.max(1, (count + PAGE_SIZE - 1) / PAGE_SIZE);
+    }
+
+    private static ItemStack control(ItemStack stack, String name) {
+        stack.set(DataComponents.CUSTOM_NAME, Component.literal(name));
+        return stack;
     }
 
     private ItemStack displayStack(NationStore.Nation nation) {
