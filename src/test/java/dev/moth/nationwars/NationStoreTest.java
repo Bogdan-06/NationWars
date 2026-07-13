@@ -1,6 +1,8 @@
 package dev.moth.nationwars;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -41,5 +43,74 @@ final class NationStoreTest {
         assertEquals(Doctrine.GERMAN, Doctrine.byId("germany").orElseThrow());
         assertEquals(Doctrine.BRITISH, Doctrine.byId("UK").orElseThrow());
         assertEquals("ROM", Doctrine.byId("romanian").orElseThrow().id);
+    }
+
+    @Test
+    void versionFourDoctrineDefaultsMatchChecklist() {
+        assertEquals(0.5, Doctrine.SOVIET.maintenanceMultiplier);
+        assertEquals(1.25, Doctrine.SOVIET.marketBuyMultiplier);
+        assertEquals(0.8, Doctrine.AMERICAN.marketBuyMultiplier);
+    }
+
+    @Test
+    void upgradeIncomeHandlesNormalSovietAndAmericanNations() {
+        assertEquals(36.0, NationRules.capitalIncome("GER", 4));
+        assertEquals(24.0, NationRules.capitalIncome("SOV", 4));
+        assertEquals(12.0, NationRules.capitalIncome("USA", 4));
+    }
+
+    @Test
+    void incomingPeaceColumnsAreOrientedForTheReceiver() {
+        assertTrue(NationRules.incomingDemandUsesOwnNation(true));
+        assertFalse(NationRules.incomingDemandUsesOwnNation(false));
+    }
+
+    @Test
+    void tradeFlipPreservesReceiverPerspectiveAndIncomeTerms() {
+        NationRules.TradeTerms source = new NationRules.TradeTerms(200.0, 500.0, 2.0, 7.0, true);
+        NationRules.TradeTerms flipped = NationRules.flipTradeTerms(source);
+        assertEquals(500.0, flipped.requestedMoney());
+        assertEquals(200.0, flipped.offeredMoney());
+        assertEquals(7.0, flipped.requestedIncome());
+        assertEquals(2.0, flipped.offeredIncome());
+        assertTrue(flipped.incomeTermsSpecified());
+    }
+
+    @Test
+    void zeroIncomeTermsCanEndAnExistingAgreement() {
+        assertTrue(NationRules.isTradeEmpty(0, 0, 0.0, 0.0, 0.0, 0.0, false));
+        assertFalse(NationRules.isTradeEmpty(0, 0, 0.0, 0.0, 0.0, 0.0, true));
+        assertEquals(0.0, NationRules.incomeAgreementNet(0.0, 0.0));
+        assertEquals(4.0, NationRules.incomeAgreementNet(7.0, 3.0));
+        assertEquals(-4.0, NationRules.incomeAgreementNet(3.0, 7.0));
+    }
+
+    @Test
+    void doctrineOverridesRejectNonFiniteNumbers() {
+        assertThrows(IllegalArgumentException.class, () -> Doctrine.finiteAtLeast(Double.NaN, 0.0, "income_multiplier"));
+        assertThrows(IllegalArgumentException.class, () -> Doctrine.finiteAtLeast(Double.POSITIVE_INFINITY, 0.0, "income_multiplier"));
+        assertEquals(0.0, Doctrine.finiteAtLeast(-3.0, 0.0, "income_multiplier"));
+    }
+
+    @Test
+    void newlyCreatedNationDefaultsToInviteOnly() {
+        assertEquals(JoinPolicy.INVITE_ONLY, new NationStore.Nation().joinPolicy());
+    }
+
+    @Test
+    void nationJoinPoliciesAcceptFriendlySpellings() {
+        assertEquals(JoinPolicy.INVITE_ONLY, JoinPolicy.parse("invite-only").orElseThrow());
+        assertEquals(JoinPolicy.CLOSED, JoinPolicy.parse("closed").orElseThrow());
+        assertTrue(JoinPolicy.parse("unknown").isEmpty());
+    }
+
+    @Test
+    void joiningInviteOnlyNationWithoutInvitationFails() {
+        assertFalse(JoinPolicy.INVITE_ONLY.allowsJoin(false));
+    }
+
+    @Test
+    void joiningOpenNationWithoutInvitationSucceeds() {
+        assertTrue(JoinPolicy.OPEN.allowsJoin(false));
     }
 }

@@ -132,16 +132,16 @@ extends AbstractContainerMenu {
         }
         if (slot == 0) {
             ItemStack empty = new ItemStack((ItemLike)Items.BARRIER);
-            empty.set(DataComponents.CUSTOM_NAME, Component.literal((String)"No market listings"));
-            empty.set(DataComponents.LORE, new ItemLore(List.of(Component.literal((String)"Use /market sellhand <price> to list your held stack."))));
+            empty.set(DataComponents.CUSTOM_NAME, NationText.tr("nationwars.gui.market.empty"));
+            empty.set(DataComponents.LORE, new ItemLore(List.of(NationText.tr("nationwars.gui.market.empty_lore"))));
             this.marketContainer.setItem(22, empty);
         }
         if (this.page > 0) {
-            this.marketContainer.setItem(45, control(Items.ARROW, "Previous page"));
+            this.marketContainer.setItem(45, control(Items.ARROW, NationText.tr("nationwars.gui.common.previous_page")));
         }
-        this.marketContainer.setItem(49, control(Items.WRITABLE_BOOK, "Market page " + (this.page + 1) + "/" + pageCount));
+        this.marketContainer.setItem(49, control(Items.WRITABLE_BOOK, NationText.tr("nationwars.gui.market.page", this.page + 1, pageCount)));
         if (this.page + 1 < pageCount) {
-            this.marketContainer.setItem(53, control(Items.ARROW, "Next page"));
+            this.marketContainer.setItem(53, control(Items.ARROW, NationText.tr("nationwars.gui.common.next_page")));
         }
     }
 
@@ -150,23 +150,23 @@ extends AbstractContainerMenu {
         return Math.max(1, (count + PAGE_SIZE - 1) / PAGE_SIZE);
     }
 
-    private static ItemStack control(net.minecraft.world.item.Item item, String name) {
+    private static ItemStack control(net.minecraft.world.item.Item item, Component name) {
         ItemStack stack = new ItemStack(item);
-        stack.set(DataComponents.CUSTOM_NAME, Component.literal(name));
+        stack.set(DataComponents.CUSTOM_NAME, name);
         return stack;
     }
 
     private ItemStack displayStack(ItemStack stack, NationStore.MarketListing listing) {
         ItemStack display = stack.copy();
         List<Component> lore = new ArrayList<>();
-        lore.add(Component.literal((String)("Price: $" + NationStore.roundMoney(listing.price))));
+        lore.add(NationText.tr("nationwars.gui.market.price", NationStore.roundMoney(listing.price)));
         double buyerPrice = this.adjustedBuyPrice(listing.price, this.playerInventory.player.getUUID());
         if (Math.abs(buyerPrice - listing.price) > 0.001) {
-            lore.add(Component.literal((String)("Your price: $" + NationStore.roundMoney(buyerPrice))));
+            lore.add(NationText.tr("nationwars.gui.market.your_price", NationStore.roundMoney(buyerPrice)));
         }
-        lore.add(Component.literal((String)("Seller: " + listing.sellerName)));
-        lore.add(Component.literal((String)("Listing #" + listing.id)));
-        lore.add(Component.literal((String)"Click to buy"));
+        lore.add(NationText.tr("nationwars.gui.market.seller", listing.sellerName));
+        lore.add(NationText.tr("nationwars.gui.market.listing", listing.id));
+        lore.add(NationText.tr("nationwars.gui.market.click_buy"));
         display.set(DataComponents.LORE, new ItemLore(lore));
         return display;
     }
@@ -181,11 +181,11 @@ extends AbstractContainerMenu {
         NationStore.MarketListing listing = store.marketListing(listingId).orElse(null);
         if (listing == null) {
             this.refreshAndSync();
-            buyer.sendSystemMessage((Component)Component.literal((String)"[NationWars] That listing is gone."));
+            buyer.sendSystemMessage(NationText.message("nationwars.market.error.gone"));
             return;
         }
         if (listing.seller.equals(buyer.getUUID().toString())) {
-            buyer.sendSystemMessage((Component)Component.literal((String)"[NationWars] You cannot buy your own listing."));
+            buyer.sendSystemMessage(NationText.message("nationwars.market.error.own_listing"));
             return;
         }
         try {
@@ -194,31 +194,29 @@ extends AbstractContainerMenu {
         catch (IllegalArgumentException exception) {
             store.removeMarketListing(listing.id);
             this.refreshAndSync();
-            buyer.sendSystemMessage((Component)Component.literal((String)"[NationWars] That listing had an invalid seller and has been removed."));
+            buyer.sendSystemMessage(NationText.message("nationwars.market.error.invalid_seller"));
             return;
         }
         ItemStack purchased = store.listingStack(listing, (HolderLookup.Provider)buyer.registryAccess());
         if (purchased.isEmpty()) {
             store.removeMarketListing(listing.id);
             this.refreshAndSync();
-            buyer.sendSystemMessage((Component)Component.literal((String)"[NationWars] That listing was invalid and has been removed."));
+            buyer.sendSystemMessage(NationText.message("nationwars.market.error.invalid_listing"));
             return;
         }
         double buyerPrice = this.adjustedBuyPrice(listing.price, buyer.getUUID());
-        if (!store.withdrawPlayerMoney(buyer.getUUID(), buyerPrice)) {
-            buyer.sendSystemMessage((Component)Component.literal((String)("[NationWars] You need $" + NationStore.roundMoney(buyerPrice) + " to buy this.")));
+        if (store.playerBalance(buyer.getUUID()) + 1.0E-4 < buyerPrice) {
+            buyer.sendSystemMessage(NationText.message("nationwars.market.error.need_money", NationStore.roundMoney(buyerPrice)));
             return;
         }
-        if (!store.removeMarketListing(listing.id)) {
-            store.addPlayerMoney(buyer.getUUID(), buyerPrice);
+        double sellerPayout = NationStore.roundMoney(Math.min(buyerPrice, this.adjustedSellerPayout(listing.price, sellerId)));
+        if (!store.purchaseMarketListing(listing.id, buyer.getUUID(), buyerPrice, sellerPayout)) {
             this.refreshAndSync();
-            buyer.sendSystemMessage((Component)Component.literal((String)"[NationWars] Someone bought that listing first."));
+            buyer.sendSystemMessage(NationText.message("nationwars.market.error.unavailable"));
             return;
         }
-        double sellerPayout = this.adjustedSellerPayout(listing.price, sellerId);
-        store.addPlayerMoney(sellerId, sellerPayout);
         buyer.getInventory().placeItemBackInInventory(purchased);
-        buyer.sendSystemMessage((Component)Component.literal((String)("[NationWars] Bought " + purchased.getCount() + "x " + purchased.getHoverName().getString() + " for $" + NationStore.roundMoney(buyerPrice) + ".")));
+        buyer.sendSystemMessage(NationText.message("nationwars.market.purchase", purchased.getCount(), purchased.getHoverName(), NationStore.roundMoney(buyerPrice)));
         this.refreshAndSync();
     }
 

@@ -20,16 +20,13 @@ import dev.moth.nationwars.ClaimKey;
 import dev.moth.nationwars.NationStore;
 import dev.moth.nationwars.NationWars;
 import dev.moth.nationwars.NationWarsConfig;
+import dev.moth.nationwars.integration.opac.OpacConfigSynchronizer;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
-import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -47,38 +44,21 @@ import xaero.pac.common.server.player.config.api.v2.PlayerConfigOptions;
 
 public final class OpacClaimsBridge {
     private static final String PARTY_SYSTEM_ID = "nationwars";
-    private static final Pattern MAX_PLAYER_CLAIMS = Pattern.compile("(?m)^(\\s*maxPlayerClaims\\s*=\\s*)\\d+\\s*$");
-    private static final Pattern PRIMARY_PARTY_SYSTEM = Pattern.compile("(?m)^(\\s*primaryPartySystem\\s*=\\s*)\"[^\"]*\"\\s*$");
-    private static final Pattern PARTY_OWNED_CLAIMS = Pattern.compile("(?m)^(\\s*partyOwnedClaims\\s*=\\s*)(?:true|false)\\s*$");
 
     private OpacClaimsBridge() {
     }
 
     public static void forceMaxPlayerClaimsZero() {
-        Path config = FMLPaths.CONFIGDIR.get().resolve("openpartiesandclaims-server.toml");
-        if (!Files.exists(config, new LinkOption[0])) {
+        if (!TechnicalConfig.synchronizeOpacConfiguration() || !TechnicalConfig.mayEditOpacConfiguration()) {
+            NationWars.LOGGER.info("Nation Wars OPAC file synchronization is disabled by technical configuration.");
             return;
         }
+        Path config = FMLPaths.CONFIGDIR.get().resolve("openpartiesandclaims-server.toml");
         try {
-            Matcher partyMatcher;
-            String text;
-            String updated = text = Files.readString(config);
-            Matcher claimsMatcher = MAX_PLAYER_CLAIMS.matcher(updated);
-            if (claimsMatcher.find()) {
-                updated = claimsMatcher.replaceFirst(Matcher.quoteReplacement(claimsMatcher.group(1) + "0"));
-            }
-            if (NationWarsConfig.get().setOpenPacPrimaryPartySystem && (partyMatcher = PRIMARY_PARTY_SYSTEM.matcher(updated)).find()) {
-                updated = partyMatcher.replaceFirst(Matcher.quoteReplacement(partyMatcher.group(1) + "\"nationwars\""));
-            }
-            if (NationWarsConfig.get().setOpenPacPrimaryPartySystem) {
-                Matcher partyOwnedMatcher = PARTY_OWNED_CLAIMS.matcher(updated);
-                if (partyOwnedMatcher.find()) {
-                    updated = partyOwnedMatcher.replaceFirst(Matcher.quoteReplacement(partyOwnedMatcher.group(1) + "true"));
-                }
-            }
-            if (!updated.equals(text)) {
-                Files.writeString(config, (CharSequence)updated, new OpenOption[0]);
-                NationWars.LOGGER.info("Updated Open Parties and Claims Nation Wars settings in {}", (Object)config);
+            OpacConfigSynchronizer.Result result = new OpacConfigSynchronizer().synchronize(config,
+                NationWarsConfig.get().setOpenPacPrimaryPartySystem);
+            if (result.changed()) {
+                NationWars.LOGGER.info("Updated OPAC configuration {}: {}", config, String.join(", ", result.changes()));
             }
         }
         catch (IOException exception) {
@@ -93,11 +73,12 @@ public final class OpacClaimsBridge {
     }
 
     public static void activatePrimaryPartySystem(MinecraftServer server) {
-        if (!NationWarsConfig.get().setOpenPacPrimaryPartySystem) {
+        if (!TechnicalConfig.synchronizeOpacConfiguration() || !NationWarsConfig.get().setOpenPacPrimaryPartySystem) {
             NationWars.LOGGER.info("Nation Wars OPAC primary party-system activation is disabled by configuration.");
             return;
         }
         try {
+            ServerConfig.CONFIG.maxPlayerClaims.set(0);
             ServerConfig.CONFIG.partyOwnedClaims.set(true);
             Object manager = OpenPACServerAPI.get((MinecraftServer)server).getPlayerConfigManager();
             if (manager instanceof IPlayerConfigManager) {

@@ -93,17 +93,15 @@ extends AbstractContainerMenu {
 
     private ItemStack displayStack(Doctrine doctrine) {
         ItemStack stack = new ItemStack((ItemLike)DoctrineMenu.iconFor(doctrine));
-        stack.set(DataComponents.CUSTOM_NAME, Component.literal((String)doctrine.displayName));
+        stack.set(DataComponents.CUSTOM_NAME, NationText.doctrineName(doctrine));
         List<Component> lore = new ArrayList<>();
-        lore.add(Component.literal((String)("ID: " + doctrine.id)));
-        lore.add(Component.literal((String)("Ideology: " + doctrine.ideology.displayName)));
-        lore.add(Component.literal((String)("Free claims: " + doctrine.freeClaims)));
-        lore.add(Component.literal((String)("Claim cost x" + doctrine.claimCostMultiplier)));
-        lore.add(Component.literal((String)("Maintenance x" + doctrine.maintenanceMultiplier)));
-        lore.add(Component.literal((String)("Capture: " + doctrine.captureSeconds + "s")));
-        for (String perk : doctrine.perkLore()) {
-            lore.add(Component.literal((String)perk));
-        }
+        lore.add(NationText.tr("nationwars.gui.doctrine.id", doctrine.id));
+        lore.add(NationText.tr("nationwars.gui.doctrine.ideology", NationText.ideologyName(doctrine.ideology)));
+        lore.add(NationText.tr("nationwars.gui.doctrine.free_claims", doctrine.freeClaims));
+        lore.add(NationText.tr("nationwars.gui.doctrine.claim_cost", doctrine.claimCostMultiplier));
+        lore.add(NationText.tr("nationwars.gui.doctrine.maintenance", doctrine.maintenanceMultiplier));
+        lore.add(NationText.tr("nationwars.gui.doctrine.capture", doctrine.captureSeconds));
+        lore.addAll(NationText.doctrinePerks(doctrine));
         stack.set(DataComponents.LORE, new ItemLore(lore));
         return stack;
     }

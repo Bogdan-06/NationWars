@@ -24,7 +24,7 @@ public final class DevCommands {
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> command(String name) {
-        return Commands.literal(name).requires(source -> source.hasPermission(2))
+        return Commands.literal(name).requires(source -> TechnicalConfig.debugCommandsEnabled() && source.hasPermission(4))
             .executes(DevCommands::help)
             .then(Commands.literal("money")
                 .then(Commands.argument("player", StringArgumentType.word())
@@ -41,11 +41,11 @@ public final class DevCommands {
     }
 
     private static int help(CommandContext<CommandSourceStack> context) {
-        context.getSource().sendSuccess(() -> Component.literal("Nation Wars development commands:"), false);
-        context.getSource().sendSuccess(() -> Component.literal("/nwdev money <online-player> <amount>"), false);
-        context.getSource().sendSuccess(() -> Component.literal("/nwdev treasury <country> <amount>"), false);
-        context.getSource().sendSuccess(() -> Component.literal("/nwdev doctrine <country> <GER|FRA|SOV|ENG|USA|ITA|ROM>"), false);
-        context.getSource().sendSuccess(() -> Component.literal("/nwdev finishspies | save | syncopac"), false);
+        context.getSource().sendSuccess(() -> NationText.tr("nationwars.command.dev.header"), false);
+        context.getSource().sendSuccess(() -> NationText.tr("nationwars.command.dev.usage.money"), false);
+        context.getSource().sendSuccess(() -> NationText.tr("nationwars.command.dev.usage.treasury"), false);
+        context.getSource().sendSuccess(() -> NationText.tr("nationwars.command.dev.usage.doctrine"), false);
+        context.getSource().sendSuccess(() -> NationText.tr("nationwars.command.dev.usage.other"), false);
         return 1;
     }
 
@@ -53,13 +53,14 @@ public final class DevCommands {
         String name = StringArgumentType.getString(context, "player");
         ServerPlayer player = context.getSource().getServer().getPlayerList().getPlayerByName(name);
         if (player == null) {
-            context.getSource().sendFailure(Component.literal("That player must be online."));
+            context.getSource().sendFailure(NationText.tr("nationwars.command.dev.error.player_online"));
             return 0;
         }
         NationStore store = NationStore.get();
         double amount = DoubleArgumentType.getDouble(context, "amount");
         store.addPlayerMoney(player.getUUID(), amount - store.playerBalance(player.getUUID()));
-        context.getSource().sendSuccess(() -> Component.literal("Set " + player.getGameProfile().getName() + "'s money to $" + NationStore.roundMoney(amount) + "."), true);
+        audit(context.getSource(), "set player money", player.getGameProfile().getName(), NationStore.roundMoney(amount));
+        context.getSource().sendSuccess(() -> NationText.tr("nationwars.command.dev.money_set", player.getGameProfile().getName(), NationStore.roundMoney(amount)), true);
         return 1;
     }
 
@@ -67,12 +68,13 @@ public final class DevCommands {
         NationStore store = NationStore.get();
         NationStore.Nation nation = store.nationByName(StringArgumentType.getString(context, "country")).orElse(null);
         if (nation == null) {
-            context.getSource().sendFailure(Component.literal("That country does not exist."));
+            context.getSource().sendFailure(NationText.tr("nationwars.command.error.country_missing"));
             return 0;
         }
         nation.balance = NationStore.roundMoney(DoubleArgumentType.getDouble(context, "amount"));
         store.save();
-        context.getSource().sendSuccess(() -> Component.literal("Set " + nation.name + "'s treasury to $" + nation.balance + "."), true);
+        audit(context.getSource(), "set nation treasury", nation.name, nation.balance);
+        context.getSource().sendSuccess(() -> NationText.tr("nationwars.command.dev.treasury_set", nation.name, nation.balance), true);
         return 1;
     }
 
@@ -81,12 +83,13 @@ public final class DevCommands {
         NationStore.Nation nation = store.nationByName(StringArgumentType.getString(context, "country")).orElse(null);
         Doctrine doctrine = Doctrine.byId(StringArgumentType.getString(context, "id")).orElse(null);
         if (nation == null || doctrine == null) {
-            context.getSource().sendFailure(Component.literal("Unknown country or doctrine."));
+            context.getSource().sendFailure(NationText.tr("nationwars.command.dev.error.country_or_doctrine"));
             return 0;
         }
         nation.doctrine = doctrine.id;
         store.save();
-        context.getSource().sendSuccess(() -> Component.literal("Set " + nation.name + "'s doctrine to " + doctrine.displayName + " (" + doctrine.id + ")."), true);
+        audit(context.getSource(), "set nation doctrine", nation.name, doctrine.id);
+        context.getSource().sendSuccess(() -> NationText.tr("nationwars.command.dev.doctrine_set", nation.name, NationText.doctrineName(doctrine), doctrine.id), true);
         return 1;
     }
 
@@ -102,20 +105,26 @@ public final class DevCommands {
             }
         }
         store.save();
+        audit(context.getSource(), "finished spy missions", "all nations", count);
         int finished = count;
-        context.getSource().sendSuccess(() -> Component.literal("Marked " + finished + " spy missions ready to complete."), true);
+        context.getSource().sendSuccess(() -> NationText.tr("nationwars.command.dev.spies_finished", finished), true);
         return 1;
     }
 
     private static int save(CommandContext<CommandSourceStack> context) {
         NationStore.get().save();
-        context.getSource().sendSuccess(() -> Component.literal("Nation Wars data saved."), true);
+        context.getSource().sendSuccess(() -> NationText.tr("nationwars.command.dev.data_saved"), true);
         return 1;
     }
 
     private static int syncOpac(CommandContext<CommandSourceStack> context) {
         OpacClaimsBridge.syncAll(context.getSource().getServer(), NationStore.get());
-        context.getSource().sendSuccess(() -> Component.literal("Nation Wars claims synchronized with OPAC."), true);
+        context.getSource().sendSuccess(() -> NationText.tr("nationwars.command.dev.opac_synced"), true);
         return 1;
+    }
+
+    private static void audit(CommandSourceStack source, String action, String target, Object value) {
+        NationWars.LOGGER.warn("Nation Wars debug command: executor='{}', action='{}', target='{}', value='{}'",
+            source.getTextName(), action, target, value);
     }
 }

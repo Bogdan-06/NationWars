@@ -18,6 +18,7 @@ import dev.moth.nationwars.NationEvents;
 import dev.moth.nationwars.OpacClaimsBridge;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
 import org.slf4j.Logger;
@@ -28,10 +29,11 @@ public final class NationWars {
     public static final Logger LOGGER = LogUtils.getLogger();
 
     public NationWars(IEventBus modBus, ModContainer container) {
-        NationWarsGameRules.bootstrap();
+        container.registerConfig(ModConfig.Type.COMMON, TechnicalConfig.SPEC, "nationwars-technical.toml");
         NeoForge.EVENT_BUS.register(NationCommands.class);
         NeoForge.EVENT_BUS.register(NationEvents.class);
         NeoForge.EVENT_BUS.register(SpyCommands.class);
+        NeoForge.EVENT_BUS.register(ConfigCommands.class);
         NeoForge.EVENT_BUS.register(DevCommands.class);
         NeoForge.EVENT_BUS.register(DoctrineDatapackReloadListener.class);
         NeoForge.EVENT_BUS.register(OpacClaimsBridge.class);

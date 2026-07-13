@@ -15,4 +15,3 @@ public enum Ideology {
         this.displayName = displayName;
     }
 }
-

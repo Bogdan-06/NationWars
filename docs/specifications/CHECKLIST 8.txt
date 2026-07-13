@@ -1,0 +1,68 @@
+CHECKLIST 8 - Update - 0.4
+------------
+
+- GENERAL - Add /nation kick and /nation leave - ability to kick a member from a nation as a leader and leave a nation as a MEMBER (YOU CANNOT LEAVE A NATION IF YOURE THE LEADER). You cannot join back to that nation unless RejoinNation is set to "true"
+
+- CONFIG - Create /configurate command - a prefix for all customization commands
+
+- CONFIG - Switch LimitedDoctrines [t/f] from /gamerule to /configurate
+
+- CONFIG - Add DisableEspionage [t/f] (false default) to /configurate - Disable the whole /spy command
+
+- CONFIG - Add ScorchedEarth [t/f] (true default) to /configurate - Enables/disables the ability to destroy eachothers chunks when at war\
+
+- CONFIG - Add InstantWar [t/f] (false default)  to /configure - Enables declaring war without justifying
+
+- CONFIG - Add DisableDoctrine [doctrine] to /configure - Disables a chosen doctrine
+
+- CONFIG - Add NoMercy [t/f] (false default) to /configure - Disables /peace command
+
+- CONFIG - Add Factions [t/f] (true default) to /configure - Enables/Disables alliances
+
+- CONFIG - Add Guarantees [t/f] (true default) to /configure - Enables/Disables ability to guarantee a nation
+
+- CONFIG - Add LeaveNation [t/f] (false default) to /configure - Enables/Disables "/nation leave"
+
+- CONFIG - Add RejoinNation [t/f] (false default) to /configure - If a Leader kicks you or you leave the nation by yourself, you can join it back
+
+- CONFIG - Add Satelites [t/f] (false default) to /configure - Enables/Disables "/nation info [name]"
+
+- GENERAL - Fix names of nations not showing up on claims
+
+- GENERAL - Disable/remove /openpac-parties (we have /alliance for that)
+
+- GENERAL - (at war) Both sides cannot attack/defend chunks when peace offer is pending
+
+- GENERAL - Replace /nation buyclaim with /nation trade which opens up a UI (kinda like the peace deal menu) where nations can trade money and chunks
+
+- ITA - Edit Developed Infrastructure: Speed II on owned claims while at peace which changes to Speed I when at war, random pay-outs for building on your territory
+
+- GENERAL - Create the "natural waters detector system" for UK - When claiming a chunk, script checks 8 block radius around it for biomes like: Warm Ocean, Lukewarm Ocean, Deep Lukewarm Ocean, Ocean, Deep Ocean, Cold Ocean, Deep Cold Ocean or river. Or if the biome which it is located on any of is any of the biomes said before or a beach. If the criteria are met, claim is considered a coast.
+
+- CONFIG - Add ClaimNether [t/f] and ClaimEnd [t/f] (both false default) to /configure - ability to claim chunks in those dimensions
+
+- CONFIG - Add SpawnProtection <number> (default 200) to configure - Adds a radius that prevents players from claiming land near spawn. <number> blocks from spawn in any direction meaning that default radius is 400x400.
+
+- USA - Edit Capitalism: Pay the claim cost to generate 0.25x worth of capital income
+
+- ENG - Edit Ports: coast claims produce 0.25x of the capital income.
+
+- ENG - Edit  Sea Lion: coast claims are captured 10s faster.
+
+- SOV - Set "maintenance" to 0.5x
+
+- GENERAL - Create "betrayal" rule - If you decline the defense of allied/guaranteed by you nation, you pay $250 penalty.
+
+- FRA - Edit No War Support: Maintenance is raised to 1.5x when you declare war. (defensive wars do not apply)
+
+- FRA - Edit Casus Foederis: declining defending allies and guatantees costs 3x as much as normal.
+
+- SOV - Edit Yellow Curtains: buying from market costs 1.25x the normal price.
+
+- SOV - Edit Great Patriotic War: Your land takes twice as long to conquer unless 2 enemy attackers are present.
+
+- USA - Edit Worldwide Economy: All the prices on the market are 0.8x of the original price.
+
+- ROM - Edit Iron Guard: losing a core claim raises maintenance by 0.1x (stacks)
+
+(btw core claim = Any claim from before the war)

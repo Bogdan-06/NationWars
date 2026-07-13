@@ -113,8 +113,8 @@ extends AbstractContainerMenu {
         List<Doctrine> available = NationStore.get().availableDoctrines();
         if (available.isEmpty()) {
             ItemStack empty = new ItemStack((ItemLike)Items.BARRIER);
-            empty.set(DataComponents.CUSTOM_NAME, Component.literal((String)"No doctrines left"));
-            empty.set(DataComponents.LORE, new ItemLore(List.of(Component.literal((String)"Every doctrine has already been picked."))));
+            empty.set(DataComponents.CUSTOM_NAME, NationText.tr("nationwars.gui.nation_create.no_doctrines"));
+            empty.set(DataComponents.LORE, new ItemLore(List.of(NationText.tr("nationwars.gui.nation_create.no_doctrines_lore"))));
             this.choicesContainer.setItem(13, empty);
             return;
         }
@@ -129,18 +129,18 @@ extends AbstractContainerMenu {
 
     private ItemStack displayStack(Doctrine doctrine) {
         ItemStack stack = new ItemStack((ItemLike)this.iconFor(doctrine));
-        stack.set(DataComponents.CUSTOM_NAME, Component.literal((String)doctrine.displayName));
+        stack.set(DataComponents.CUSTOM_NAME, NationText.doctrineName(doctrine));
         List<Component> lore = new ArrayList<>();
-        lore.add(Component.literal((String)(this.nationName.isBlank() ? "Name: type after picking" : "Creates: " + this.nationName)));
-        lore.add(Component.literal((String)("Ideology: " + doctrine.ideology.displayName)));
-        lore.add(Component.literal((String)("Free claims: " + doctrine.freeClaims)));
-        lore.add(Component.literal((String)("Claim cost x" + doctrine.claimCostMultiplier)));
-        lore.add(Component.literal((String)("Maintenance x" + doctrine.maintenanceMultiplier)));
-        lore.add(Component.literal((String)("Capture: " + doctrine.captureSeconds + "s")));
-        for (String perk : doctrine.perkLore()) {
-            lore.add(Component.literal((String)perk));
-        }
-        lore.add(Component.literal((String)"Click to create"));
+        lore.add(this.nationName.isBlank()
+            ? NationText.tr("nationwars.gui.nation_create.name_after_selection")
+            : NationText.tr("nationwars.gui.nation_create.creates", this.nationName));
+        lore.add(NationText.tr("nationwars.gui.doctrine.ideology", NationText.ideologyName(doctrine.ideology)));
+        lore.add(NationText.tr("nationwars.gui.doctrine.free_claims", doctrine.freeClaims));
+        lore.add(NationText.tr("nationwars.gui.doctrine.claim_cost", doctrine.claimCostMultiplier));
+        lore.add(NationText.tr("nationwars.gui.doctrine.maintenance", doctrine.maintenanceMultiplier));
+        lore.add(NationText.tr("nationwars.gui.doctrine.capture", doctrine.captureSeconds));
+        lore.addAll(NationText.doctrinePerks(doctrine));
+        lore.add(NationText.tr("nationwars.gui.nation_create.click"));
         stack.set(DataComponents.LORE, new ItemLore(lore));
         return stack;
     }

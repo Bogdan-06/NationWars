@@ -135,21 +135,21 @@ extends AbstractContainerMenu {
         }
         if (slot == 0) {
             ItemStack empty = new ItemStack((ItemLike)Items.BARRIER);
-            empty.set(DataComponents.CUSTOM_NAME, Component.literal((String)"No wars or justifications"));
-            empty.set(DataComponents.LORE, new ItemLore(List.of(Component.literal((String)"Start with /war justify <nation>."))));
+            empty.set(DataComponents.CUSTOM_NAME, NationText.tr("nationwars.gui.wars.empty"));
+            empty.set(DataComponents.LORE, new ItemLore(List.of(NationText.tr("nationwars.gui.wars.empty_lore"))));
             this.warContainer.setItem(13, empty);
         }
-        this.setHint(45, Items.WRITABLE_BOOK.getDefaultInstance(), "Justify war", "/war justify <nation>");
-        this.setHint(46, Items.IRON_SWORD.getDefaultInstance(), "Declare war", "/war declare <nation>");
-        this.setHint(47, Items.SHIELD.getDefaultInstance(), "Join or defend", "/war join <nation> | /war defend <nation>");
-        this.setHint(48, Items.WHITE_BANNER.getDefaultInstance(), "Peace deal", "/peace <nation>");
-        this.setHint(49, Items.RED_BANNER.getDefaultInstance(), "Surrender", "/surrender <nation>");
+        this.setHint(45, Items.WRITABLE_BOOK.getDefaultInstance(), NationText.tr("nationwars.gui.wars.justify"), "/war justify <nation>");
+        this.setHint(46, Items.IRON_SWORD.getDefaultInstance(), NationText.tr("nationwars.gui.wars.declare"), "/war declare <nation>");
+        this.setHint(47, Items.SHIELD.getDefaultInstance(), NationText.tr("nationwars.gui.wars.join_defend"), "/war join <nation> | /war defend <nation>");
+        this.setHint(48, Items.WHITE_BANNER.getDefaultInstance(), NationText.tr("nationwars.gui.wars.peace"), "/peace <nation>");
+        this.setHint(49, Items.RED_BANNER.getDefaultInstance(), NationText.tr("nationwars.gui.wars.surrender"), "/surrender <nation>");
         if (this.page > 0) {
-            this.warContainer.setItem(50, control(Items.ARROW.getDefaultInstance(), "Previous wars"));
+            this.warContainer.setItem(50, control(Items.ARROW.getDefaultInstance(), NationText.tr("nationwars.gui.wars.previous")));
         }
-        this.warContainer.setItem(51, control(Items.WRITABLE_BOOK.getDefaultInstance(), "Wars page " + (this.page + 1) + "/" + pageCount));
+        this.warContainer.setItem(51, control(Items.WRITABLE_BOOK.getDefaultInstance(), NationText.tr("nationwars.gui.wars.page", this.page + 1, pageCount)));
         if (this.page + 1 < pageCount) {
-            this.warContainer.setItem(53, control(Items.ARROW.getDefaultInstance(), "Next wars"));
+            this.warContainer.setItem(53, control(Items.ARROW.getDefaultInstance(), NationText.tr("nationwars.gui.wars.next")));
         }
     }
 
@@ -158,8 +158,8 @@ extends AbstractContainerMenu {
         return Math.max(1, (count + PAGE_SIZE - 1) / PAGE_SIZE);
     }
 
-    private static ItemStack control(ItemStack stack, String name) {
-        stack.set(DataComponents.CUSTOM_NAME, Component.literal(name));
+    private static ItemStack control(ItemStack stack, Component name) {
+        stack.set(DataComponents.CUSTOM_NAME, name);
         return stack;
     }
 
@@ -167,41 +167,41 @@ extends AbstractContainerMenu {
         String attacker = store.nationById(war.attacker).map(nation -> nation.name).orElse(war.attacker);
         String defender = store.nationById(war.defender).map(nation -> nation.name).orElse(war.defender);
         ItemStack stack = new ItemStack((ItemLike)(war.active ? Items.IRON_SWORD : Items.CLOCK));
-        stack.set(DataComponents.CUSTOM_NAME, Component.literal((String)(attacker + " vs " + defender)));
+        stack.set(DataComponents.CUSTOM_NAME, NationText.tr("nationwars.war.versus", attacker, defender));
         List<Component> lore = new ArrayList<>();
         if (war.active) {
-            lore.add(Component.literal((String)"Status: active"));
-            lore.add(Component.literal((String)("Attackers: " + WarMenu.nationNames(store, war.attackerSide))));
-            lore.add(Component.literal((String)("Defenders: " + WarMenu.nationNames(store, war.defenderSide))));
-            lore.add(Component.literal((String)("Captured claims: " + WarMenu.capturedCount(war))));
+            lore.add(NationText.tr("nationwars.gui.wars.status.active"));
+            lore.add(NationText.tr("nationwars.gui.wars.attackers", WarMenu.nationNames(store, war.attackerSide)));
+            lore.add(NationText.tr("nationwars.gui.wars.defenders", WarMenu.nationNames(store, war.defenderSide)));
+            lore.add(NationText.tr("nationwars.gui.wars.captured", WarMenu.capturedCount(war)));
             if (!war.joinRequests.isEmpty()) {
-                lore.add(Component.literal((String)("Pending joins: " + WarMenu.nationNames(store, war.joinRequests.keySet()))));
+                lore.add(NationText.tr("nationwars.gui.wars.pending_joins", WarMenu.nationNames(store, war.joinRequests.keySet())));
             }
             if (war.peaceDeal != null) {
-                lore.add(Component.literal((String)"Peace offer pending"));
+                lore.add(NationText.tr("nationwars.gui.wars.peace_pending"));
             }
         } else if (war.pendingDefenderResponse) {
-            lore.add(Component.literal((String)"Status: waiting for defender response"));
+            lore.add(NationText.tr("nationwars.gui.wars.status.waiting"));
         } else {
             long secondsLeft = Math.max(0L, (war.justificationCompleteTick - NationStore.persistentNow()) / 20L);
-            lore.add(Component.literal((String)"Status: justifying"));
-            lore.add(Component.literal((String)("Ready in: " + secondsLeft + "s")));
+            lore.add(NationText.tr("nationwars.gui.wars.status.justifying"));
+            lore.add(NationText.tr("nationwars.gui.wars.ready_in", secondsLeft));
         }
-        lore.add(Component.literal((String)"Click for details"));
+        lore.add(NationText.tr("nationwars.gui.common.click_details"));
         stack.set(DataComponents.LORE, new ItemLore(lore));
         return stack;
     }
 
-    private void setHint(int slot, ItemStack stack, String title, String command) {
-        stack.set(DataComponents.CUSTOM_NAME, Component.literal((String)title));
-        stack.set(DataComponents.LORE, new ItemLore(List.of(Component.literal((String)command), Component.literal((String)"Click to print command"))));
+    private void setHint(int slot, ItemStack stack, Component title, String command) {
+        stack.set(DataComponents.CUSTOM_NAME, title);
+        stack.set(DataComponents.LORE, new ItemLore(List.of(Component.literal(command), NationText.tr("nationwars.gui.wars.click_command"))));
         this.hints[slot] = command;
         this.warContainer.setItem(slot, stack);
     }
 
     private void sendDetailsOrHint(ServerPlayer player, int slotIndex) {
         if (this.hints[slotIndex] != null) {
-            player.sendSystemMessage((Component)Component.literal((String)("[NationWars] " + this.hints[slotIndex])));
+            player.sendSystemMessage(NationText.message("nationwars.gui.wars.command_hint", this.hints[slotIndex]));
             return;
         }
         if (this.warIds[slotIndex] == null) {
@@ -211,15 +211,15 @@ extends AbstractContainerMenu {
         NationStore.War war = store.wars().stream().filter(candidate -> this.warIds[slotIndex].equals(candidate.id)).findFirst().orElse(null);
         if (war == null) {
             this.refreshAndSync();
-            player.sendSystemMessage((Component)Component.literal((String)"[NationWars] That war no longer exists."));
+            player.sendSystemMessage(NationText.message("nationwars.gui.wars.error.gone"));
             return;
         }
         String attacker = store.nationById(war.attacker).map(nation -> nation.name).orElse(war.attacker);
         String defender = store.nationById(war.defender).map(nation -> nation.name).orElse(war.defender);
-        player.sendSystemMessage((Component)Component.literal((String)("[NationWars] " + attacker + " vs " + defender)));
-        player.sendSystemMessage((Component)Component.literal((String)("Attackers: " + WarMenu.nationNames(store, war.attackerSide))));
-        player.sendSystemMessage((Component)Component.literal((String)("Defenders: " + WarMenu.nationNames(store, war.defenderSide))));
-        player.sendSystemMessage((Component)Component.literal((String)("Captured claims: " + WarMenu.capturedCount(war))));
+        player.sendSystemMessage(NationText.message("nationwars.war.versus", attacker, defender));
+        player.sendSystemMessage(NationText.tr("nationwars.gui.wars.attackers", WarMenu.nationNames(store, war.attackerSide)));
+        player.sendSystemMessage(NationText.tr("nationwars.gui.wars.defenders", WarMenu.nationNames(store, war.defenderSide)));
+        player.sendSystemMessage(NationText.tr("nationwars.gui.wars.captured", WarMenu.capturedCount(war)));
     }
 
     private void refreshAndSync() {
@@ -227,11 +227,11 @@ extends AbstractContainerMenu {
         this.broadcastChanges();
     }
 
-    private static String nationNames(NationStore store, Set<String> ids) {
+    private static Component nationNames(NationStore store, Set<String> ids) {
         if (ids.isEmpty()) {
-            return "none";
+            return NationText.tr("nationwars.common.none");
         }
-        return ids.stream().map(id -> store.nationById((String)id).map(nation -> nation.name).orElse((String)id)).sorted().collect(Collectors.joining(", "));
+        return Component.literal(ids.stream().map(id -> store.nationById((String)id).map(nation -> nation.name).orElse((String)id)).sorted().collect(Collectors.joining(", ")));
     }
 
     private static int capturedCount(NationStore.War war) {

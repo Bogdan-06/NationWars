@@ -42,7 +42,7 @@ public final class SpyCommands {
     @SubscribeEvent
     public static void register(RegisterCommandsEvent event) {
         CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
-        dispatcher.register(Commands.literal("spy").requires(source -> source.hasPermission(0))
+        dispatcher.register(Commands.literal("spy").requires(source -> source.hasPermission(0) && !NationWarsConfig.get().disableEspionage)
             .then(Commands.literal("create").executes(SpyCommands::createAgency))
             .then(Commands.literal("hire").executes(SpyCommands::hireSpy))
             .then(Commands.literal("set")
@@ -78,12 +78,13 @@ public final class SpyCommands {
                         spy.country = "";
                     }
                     spy.availableTick = 0L;
-                    store.notifyNation(event.getServer(), nation, Component.literal("[NationWars] " + spyLabel(spy)
-                        + (destinationExists ? " arrived in " + countryName(store, spy.country) + "." : "'s destination no longer exists, so the spy returned home.")));
+                    store.notifyNation(event.getServer(), nation, destinationExists
+                        ? NationText.message("nationwars.spy.travel.arrived", spyLabel(spy), countryName(store, spy.country))
+                        : NationText.message("nationwars.spy.travel.destination_gone", spyLabel(spy)));
                     changed = true;
                 } else if ("counterspy".equals(spy.status) && spy.availableTick <= tick) {
                     beginRecovery(spy, tick);
-                    store.notifyNation(event.getServer(), nation, Component.literal("[NationWars] " + spyLabel(spy) + " finished their counterspy assignment and will recover for " + SpyRecovery.SECONDS + " seconds."));
+                    store.notifyNation(event.getServer(), nation, NationText.message("nationwars.spy.counterspy.finished", spyLabel(spy), SpyRecovery.SECONDS));
                     changed = true;
                 } else if ("recovering".equals(spy.status) && spy.availableTick <= tick) {
                     boolean countryExists = store.nationById(spy.country).isPresent();
@@ -94,8 +95,9 @@ public final class SpyCommands {
                     if (!countryExists) {
                         spy.country = "";
                     }
-                    store.notifyNation(event.getServer(), nation, Component.literal("[NationWars] " + spyLabel(spy)
-                        + (countryExists ? " recovered and is stationed in " + countryName(store, spy.country) + " again." : " recovered and returned home.")));
+                    store.notifyNation(event.getServer(), nation, countryExists
+                        ? NationText.message("nationwars.spy.recovery.stationed", spyLabel(spy), countryName(store, spy.country))
+                        : NationText.message("nationwars.spy.recovery.home", spyLabel(spy)));
                     changed = true;
                 }
             }
@@ -122,7 +124,7 @@ public final class SpyCommands {
             return 0;
         }
         if (nation.spyAgency != null) {
-            fail(player, "Your nation already has a spy agency.");
+            fail(player, "nationwars.spy.error.agency_exists");
             return 0;
         }
         if (!canSpend(player, store, nation, AGENCY_COST)) {
@@ -130,7 +132,7 @@ public final class SpyCommands {
         }
         nation.balance = NationStore.roundMoney(nation.balance - AGENCY_COST);
         store.createSpyAgency(nation);
-        ok(player, "You have successfully created a spy agency.");
+        ok(player, "nationwars.spy.agency.created");
         return 1;
     }
 
@@ -143,7 +145,7 @@ public final class SpyCommands {
         }
         int next = nation.spyAgency.spies.size() + 1;
         if (next > maxSpies(nation)) {
-            fail(player, "Your spy limit is " + maxSpies(nation) + ".");
+            fail(player, "nationwars.spy.error.limit", maxSpies(nation));
             return 0;
         }
         double cost = next > BASE_SPY_LIMIT ? FRENCH_BONUS_SPY_COST : hireCost(next);
@@ -152,7 +154,7 @@ public final class SpyCommands {
         }
         nation.balance = NationStore.roundMoney(nation.balance - cost);
         NationStore.SpyUnit spy = store.hireSpy(nation);
-        ok(player, "You have hired spy " + spy.id + ", which cost $" + NationStore.roundMoney(cost) + ".");
+        ok(player, "nationwars.spy.hired", spy.id, NationStore.roundMoney(cost));
         return 1;
     }
 
@@ -166,12 +168,12 @@ public final class SpyCommands {
             return 0;
         }
         if (target == null) {
-            fail(player, "That country does not exist.");
+            fail(player, "nationwars.command.error.country_missing");
             return 0;
         }
         List<NationStore.SpyUnit> available = nation.spyAgency.spies.stream().filter(spy -> "idle".equals(spy.status) || "stationed".equals(spy.status)).limit(amount).toList();
         if (available.size() < amount) {
-            fail(player, "You need " + amount + " available spies, but only " + available.size() + " are idle or stationed.");
+            fail(player, "nationwars.spy.error.available", amount, available.size());
             return 0;
         }
         long arrival = NationStore.persistentNow() + TRAVEL_SECONDS * 20L;
@@ -183,7 +185,7 @@ public final class SpyCommands {
             spy.availableTick = arrival;
         }
         store.save();
-        ok(player, (amount == 1 ? "The spy will" : "The spies will") + " arrive at the destination in " + TRAVEL_SECONDS + " seconds.");
+        ok(player, amount == 1 ? "nationwars.spy.travel.sent_one" : "nationwars.spy.travel.sent_many", TRAVEL_SECONDS);
         return 1;
     }
 
@@ -194,11 +196,15 @@ public final class SpyCommands {
         if (nation == null || !requireAgency(player, nation)) {
             return 0;
         }
-        player.openMenu((MenuProvider)new SimpleMenuProvider((containerId, inventory, viewer) -> new SpyMissionMenu(containerId, inventory), Component.literal("spy mission")));
+        player.openMenu((MenuProvider)new SimpleMenuProvider((containerId, inventory, viewer) -> new SpyMissionMenu(containerId, inventory), NationText.tr("nationwars.gui.spy_mission.title")));
         return 1;
     }
 
     static boolean launchMission(ServerPlayer player, String targetId, String missionId, List<String> chunks) {
+        if (NationWarsConfig.get().disableEspionage) {
+            fail(player, "nationwars.spy.error.disabled");
+            return false;
+        }
         NationStore store = NationStore.get();
         NationStore.Nation nation = requireOwnerNation(player, store);
         NationStore.Nation target = store.nationById(targetId).orElse(null);
@@ -207,37 +213,42 @@ public final class SpyCommands {
             return false;
         }
         if (target == null || type == null) {
-            fail(player, "Unknown country or mission. Reopen /spy mission.");
+            fail(player, "nationwars.spy.error.unknown_target_mission");
             return false;
         }
         if (type == MissionType.COUNTERSPY && !target.id.equals(nation.id)) {
-            fail(player, "Counterspies can only defend your own country.");
+            fail(player, "nationwars.spy.error.counterspy_own");
+            return false;
+        }
+        if (type != MissionType.COUNTERSPY && target.id.equals(nation.id)) {
+            fail(player, "nationwars.spy.error.only_counterspy_own");
             return false;
         }
         if (chunks == null || chunks.size() != type.chunkCount || new java.util.HashSet<>(chunks).size() != chunks.size()) {
-            fail(player, type.chunkCount == 0 ? "That mission does not use a chunk." : "That mission needs exactly " + type.chunkCount + " chunk" + (type.chunkCount == 1 ? "" : "s") + ".");
+            fail(player, type.chunkCount == 0 ? "nationwars.spy.error.no_chunk"
+                : type.chunkCount == 1 ? "nationwars.spy.error.one_chunk" : "nationwars.spy.error.chunk_count", type.chunkCount);
             return false;
         }
         for (String chunk : chunks) {
             try {
                 if (!target.id.equals(store.nationOwning(ClaimKey.parse(chunk)).map(owner -> owner.id).orElse(""))) {
-                    fail(player, "Every selected chunk must currently be owned by " + target.name + ".");
+                    fail(player, "nationwars.spy.error.claim_owner", target.name);
                     return false;
                 }
             } catch (RuntimeException exception) {
-                fail(player, "A selected chunk is invalid. Reopen /spy mission.");
+                fail(player, "nationwars.spy.error.invalid_claim");
                 return false;
             }
         }
         if (type == MissionType.RAID && !raidTargetAllowed(store, nation, target, player.getServer())) {
-            fail(player, "RAID requires an online target between half and twice your nation's size.");
+            fail(player, "nationwars.spy.error.raid_requirements");
             return false;
         }
         NationStore.SpyUnit spy = nation.spyAgency.spies.stream()
             .filter(unit -> "stationed".equals(unit.status) && target.id.equals(unit.country))
             .findFirst().orElse(null);
         if (spy == null) {
-            fail(player, "No stationed spy is available in " + target.name + ". Use /spy set first.");
+            fail(player, "nationwars.spy.error.no_stationed", target.name);
             return false;
         }
         if (!canSpend(player, store, nation, type.cost)) {
@@ -249,7 +260,7 @@ public final class SpyCommands {
         spy.targetChunk = chunks.isEmpty() ? "" : chunks.get(0);
         spy.availableTick = NationStore.persistentNow() + type.seconds * 20L;
         store.createSpyMission(nation, target, spy, type.id, chunks, spy.availableTick);
-        ok(player, "You've sent spy " + spy.id + " to " + target.name + " on mission " + type.id + ", which will take " + type.seconds + " seconds.");
+        ok(player, "nationwars.spy.mission.sent", spy.id, target.name, missionName(type.id), type.seconds);
         return true;
     }
 
@@ -274,18 +285,18 @@ public final class SpyCommands {
         }
         NationStore.SpyIntel intel = store.spyIntel(viewer, target, false);
         if (intel == null) {
-            fail(player, "You have no intelligence on " + target.name + ".");
+            fail(player, "nationwars.spy.error.no_intel", target.name);
             return 0;
         }
-        player.sendSystemMessage(Component.literal("[NationWars] Known intelligence on " + value(intel, "name", intel.name) + ":"));
-        showField(player, intel, "doctrine", "Doctrine", intel.doctrine);
-        showField(player, intel, "ideology", "Ideology", intel.ideology);
-        showField(player, intel, "balance", "Treasury", intel.balance);
-        showField(player, intel, "capital", "Capital", intel.capital);
-        showField(player, intel, "size", "Size", intel.size);
-        showField(player, intel, "members", "Members", intel.members);
-        showField(player, intel, "faction", "Faction", intel.faction);
-        showField(player, intel, "guarantees", "Guarantees", intel.guarantees);
+        player.sendSystemMessage(NationText.message("nationwars.spy.intel.header", intelValue(intel, "name", intel.name)));
+        showField(player, intel, "doctrine", intel.doctrine);
+        showField(player, intel, "ideology", intel.ideology);
+        showField(player, intel, "balance", intel.balance);
+        showField(player, intel, "capital", intel.capital);
+        showField(player, intel, "size", intel.size);
+        showField(player, intel, "members", intel.members);
+        showField(player, intel, "faction", intel.faction);
+        showField(player, intel, "guarantees", intel.guarantees);
         return 1;
     }
 
@@ -299,7 +310,7 @@ public final class SpyCommands {
         }
         NationStore.SpyIntel intel = store.spyIntel(viewer, target, false);
         if (intel == null || intel.known.isEmpty()) {
-            fail(player, "You have no intelligence to update.");
+            fail(player, "nationwars.spy.error.no_intel_update");
             return 0;
         }
         double cost = intel.known.size() * 100.0;
@@ -309,13 +320,13 @@ public final class SpyCommands {
         viewer.balance = NationStore.roundMoney(viewer.balance - cost);
         refreshKnownIntel(player.getServer(), store, target, intel);
         store.save();
-        ok(player, "Updated " + intel.known.size() + " known intelligence fields for $" + NationStore.roundMoney(cost) + ".");
+        ok(player, "nationwars.spy.intel.updated", intel.known.size(), NationStore.roundMoney(cost));
         return 1;
     }
 
     private static int status(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         ServerPlayer player = context.getSource().getPlayerOrException();
-        player.openMenu((MenuProvider)new SimpleMenuProvider((containerId, inventory, viewer) -> new SpyMenu(containerId, inventory), Component.literal("spies")));
+        player.openMenu((MenuProvider)new SimpleMenuProvider((containerId, inventory, viewer) -> new SpyMenu(containerId, inventory), NationText.tr("nationwars.gui.spy.title")));
         return 1;
     }
 
@@ -334,21 +345,21 @@ public final class SpyCommands {
         if (type.chunkCount > 0 && (mission.chunks == null || mission.chunks.size() != type.chunkCount || new java.util.HashSet<>(mission.chunks).size() != mission.chunks.size()
             || mission.chunks.stream().anyMatch(chunk -> !isOwnedBy(store, chunk, target)))) {
             beginRecovery(spy, tick);
-            store.notifyNation(server, nation, Component.literal("[NationWars] " + spyLabel(spy) + "'s " + type.id + " mission was cancelled because the selected territory changed ownership. Recovery: " + SpyRecovery.SECONDS + " seconds."));
+            store.notifyNation(server, nation, NationText.message("nationwars.spy.mission.cancelled_ownership", spyLabel(spy), missionName(type.id), SpyRecovery.SECONDS));
             store.removeSpyMission(mission);
             return;
         }
         String claimId = mission.chunks == null || mission.chunks.isEmpty() ? "" : mission.chunks.get(0);
         if (type.counterable && !claimId.isBlank() && counterspyBlocks(store, target, claimId, tick)) {
             beginRecovery(spy, tick);
-            store.notifyNation(server, nation, Component.literal("[NationWars] " + spyLabel(spy) + "'s " + type.id + " mission was blocked by a counterspy. Recovery: " + SpyRecovery.SECONDS + " seconds."));
-            store.notifyNation(server, target, Component.literal("[NationWars] A counterspy blocked an enemy " + type.id + " mission at " + shortChunk(claimId) + "."));
+            store.notifyNation(server, nation, NationText.message("nationwars.spy.mission.blocked", spyLabel(spy), missionName(type.id), SpyRecovery.SECONDS));
+            store.notifyNation(server, target, NationText.message("nationwars.spy.mission.blocked_defender", missionName(type.id), shortChunk(claimId)));
             store.removeSpyMission(mission);
             return;
         }
         if (RANDOM.nextDouble() < type.failureChance) {
             beginRecovery(spy, tick);
-            store.notifyNation(server, nation, Component.literal("[NationWars] " + spyLabel(spy) + " failed mission " + type.id + " in " + target.name + ". Recovery: " + SpyRecovery.SECONDS + " seconds."));
+            store.notifyNation(server, nation, NationText.message("nationwars.spy.mission.failed", spyLabel(spy), missionName(type.id), target.name, SpyRecovery.SECONDS));
             store.removeSpyMission(mission);
             return;
         }
@@ -358,7 +369,7 @@ public final class SpyCommands {
                 spy.mission = "counterspy";
                 spy.targetChunk = claimId;
                 spy.availableTick = tick + COUNTERSPY_DURATION_SECONDS * 20L;
-                store.notifyNation(server, nation, Component.literal("[NationWars] " + spyLabel(spy) + " is counterspying at " + shortChunk(claimId) + " for " + COUNTERSPY_DURATION_SECONDS + " seconds."));
+                store.notifyNation(server, nation, NationText.message("nationwars.spy.counterspy.active", spyLabel(spy), shortChunk(claimId), COUNTERSPY_DURATION_SECONDS));
             }
             case DOCTRINE -> revealDoctrine(store, nation, target, tick);
             case TREASURY -> revealField(store, nation, target, "balance", tick);
@@ -380,7 +391,7 @@ public final class SpyCommands {
             case RAID -> {
                 if (!raidTargetAllowed(store, nation, target, server)) {
                     beginRecovery(spy, tick);
-                    store.notifyNation(server, nation, Component.literal("[NationWars] RAID failed because the target no longer meets the size or online requirements."));
+                    store.notifyNation(server, nation, NationText.message("nationwars.spy.raid.failed_requirements"));
                     store.removeSpyMission(mission);
                     return;
                 } else {
@@ -391,8 +402,9 @@ public final class SpyCommands {
         if (type != MissionType.COUNTERSPY) {
             beginRecovery(spy, tick);
         }
-        store.notifyNation(server, nation, Component.literal("[NationWars] " + spyLabel(spy) + " completed mission " + type.id + " in " + target.name
-            + (type == MissionType.COUNTERSPY ? "." : ". Recovery: " + SpyRecovery.SECONDS + " seconds.")));
+        store.notifyNation(server, nation, type == MissionType.COUNTERSPY
+            ? NationText.message("nationwars.spy.mission.completed_counterspy", spyLabel(spy), missionName(type.id), target.name)
+            : NationText.message("nationwars.spy.mission.completed", spyLabel(spy), missionName(type.id), target.name, SpyRecovery.SECONDS));
         store.removeSpyMission(mission);
     }
 
@@ -430,7 +442,7 @@ public final class SpyCommands {
     private static void resolveScout(MinecraftServer server, NationStore store, NationStore.Nation viewer, NationStore.Nation target, NationStore.SpyMission mission, long tick) {
         List<String> capitals = mission.chunks.stream().filter(chunk -> chunk.equals(target.capitalClaim)).toList();
         if (capitals.isEmpty()) {
-            store.notifyNation(server, viewer, Component.literal("[NationWars] None of the selected chunks are the capital."));
+            store.notifyNation(server, viewer, NationText.message("nationwars.spy.scout.no_capital"));
             return;
         }
         String capital = capitals.get(0);
@@ -438,19 +450,19 @@ public final class SpyCommands {
         intel.known.add("capital");
         intel.capital = shortChunk(capital);
         intel.updatedTick = tick;
-        store.notifyNation(server, viewer, Component.literal("[NationWars] Chunk " + shortChunk(capital) + " is the capital city."));
+        store.notifyNation(server, viewer, NationText.message("nationwars.spy.scout.capital", shortChunk(capital)));
     }
 
     private static void resolveSteal(NationStore store, NationStore.Nation thief, NationStore.Nation target, String claimId) {
         if (!claimId.equals(target.capitalClaim)) {
-            store.notifyNation(store.server(), thief, Component.literal("[NationWars] STEAL failed: the selected chunk was not the capital."));
+            store.notifyNation(store.server(), thief, NationText.message("nationwars.spy.steal.not_capital"));
             return;
         }
         double stolen = NationStore.roundMoney(target.balance * 0.45);
         target.balance = NationStore.roundMoney(target.balance - stolen);
         thief.balance = NationStore.roundMoney(thief.balance + stolen);
-        store.notifyNation(store.server(), thief, Component.literal("[NationWars] Your spy stole $" + stolen + " from " + target.name + "."));
-        store.notifyNation(store.server(), target, Component.literal("[NationWars] A spy stole $" + stolen + " from your treasury."));
+        store.notifyNation(store.server(), thief, NationText.message("nationwars.spy.steal.success", stolen, target.name));
+        store.notifyNation(store.server(), target, NationText.message("nationwars.spy.steal.target", stolen));
     }
 
     private static void refreshKnownIntel(MinecraftServer server, NationStore store, NationStore.Nation target, NationStore.SpyIntel intel) {
@@ -499,11 +511,11 @@ public final class SpyCommands {
     private static NationStore.Nation requireOwnerNation(ServerPlayer player, NationStore store) {
         NationStore.Nation nation = store.nationOf(player.getUUID()).orElse(null);
         if (nation == null) {
-            fail(player, "Create or join a nation first.");
+            fail(player, "nationwars.command.error.create_or_join");
             return null;
         }
         if (!store.isOwner(player.getUUID(), nation)) {
-            fail(player, "Only the nation owner can manage the spy agency.");
+            fail(player, "nationwars.spy.error.owner_only");
             return null;
         }
         return nation;
@@ -513,7 +525,7 @@ public final class SpyCommands {
         if (nation.spyAgency != null) {
             return true;
         }
-        fail(player, "Create a spy agency first with /spy create.");
+        fail(player, "nationwars.spy.error.create_agency");
         return false;
     }
 
@@ -521,11 +533,11 @@ public final class SpyCommands {
         long tick = NationStore.persistentNow();
         if (store.isSpendingBlocked(nation, tick)) {
             long seconds = Math.max(1L, (store.spendingBlockedUntil(nation) - tick + 19L) / 20L);
-            fail(player, "Your capital is infiltrated; treasury spending is blocked for " + seconds + " seconds.");
+            fail(player, "nationwars.command.error.spending_blocked_time", seconds);
             return false;
         }
         if (nation.balance + 0.0001 < cost) {
-            fail(player, "Nation treasury needs $" + NationStore.roundMoney(cost) + ".");
+            fail(player, "nationwars.command.error.treasury_needs", NationStore.roundMoney(cost));
             return false;
         }
         return true;
@@ -549,8 +561,8 @@ public final class SpyCommands {
         return store.nationById(id).map(nation -> nation.name).orElse(id);
     }
 
-    private static String spyLabel(NationStore.SpyUnit spy) {
-        return "Spy " + spy.id;
+    private static Component spyLabel(NationStore.SpyUnit spy) {
+        return NationText.tr("nationwars.spy.label", spy.id);
     }
 
     private static String shortChunk(String claimId) {
@@ -562,20 +574,47 @@ public final class SpyCommands {
         }
     }
 
-    private static String value(NationStore.SpyIntel intel, String field, String value) {
-        return intel.known.contains(field) && value != null && !value.isBlank() ? value : "Unknown";
+    private static Component intelValue(NationStore.SpyIntel intel, String field, String value) {
+        if (!intel.known.contains(field) || value == null || value.isBlank()) {
+            return NationText.tr("nationwars.spy.intel.unknown");
+        }
+        if ("none".equalsIgnoreCase(value)) {
+            return NationText.tr("nationwars.common.none");
+        }
+        if ("ideology".equals(field)) {
+            for (Ideology ideology : Ideology.values()) {
+                if (ideology.displayName.equalsIgnoreCase(value)) {
+                    return NationText.ideologyName(ideology);
+                }
+            }
+        }
+        if ("doctrine".equals(field)) {
+            for (Doctrine doctrine : Doctrine.values()) {
+                if (value.equals(doctrine.displayName + " (" + doctrine.id + ")")) {
+                    return NationText.tr("nationwars.spy.intel.doctrine_value", NationText.doctrineName(doctrine), doctrine.id);
+                }
+            }
+        }
+        if ("size".equals(field) && value.endsWith(" claims")) {
+            return NationText.tr("nationwars.spy.intel.size_value", value.substring(0, value.length() - " claims".length()));
+        }
+        return Component.literal(value);
     }
 
-    private static void showField(ServerPlayer player, NationStore.SpyIntel intel, String field, String label, String value) {
-        player.sendSystemMessage(Component.literal(label + ": " + value(intel, field, value)));
+    private static void showField(ServerPlayer player, NationStore.SpyIntel intel, String field, String value) {
+        player.sendSystemMessage(NationText.tr("nationwars.spy.intel.field." + field, intelValue(intel, field, value)));
     }
 
-    private static void ok(ServerPlayer player, String message) {
-        player.sendSystemMessage(Component.literal("[NationWars] " + message));
+    private static Component missionName(String id) {
+        return NationText.tr("nationwars.spy.mission." + id + ".name");
     }
 
-    private static void fail(ServerPlayer player, String message) {
-        player.sendSystemMessage(Component.literal("[NationWars] " + message));
+    private static void ok(ServerPlayer player, String key, Object... arguments) {
+        player.sendSystemMessage(NationText.message(key, arguments));
+    }
+
+    private static void fail(ServerPlayer player, String key, Object... arguments) {
+        player.sendSystemMessage(NationText.message(key, arguments));
     }
 
     private enum MissionType {

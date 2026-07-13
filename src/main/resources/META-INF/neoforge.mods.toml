@@ -4,7 +4,7 @@ license="All Rights Reserved"
 
 [[mods]]
 modId="nationwars"
-version="0.3.0"
+version="0.4.0"
 displayName="Nation Wars"
 authors="Moth"
 description='''
@@ -21,7 +21,7 @@ side="BOTH"
 [[dependencies.nationwars]]
 modId="minecraft"
 type="required"
-versionRange="[1.21.1,1.22)"
+versionRange="[1.21.1]"
 ordering="NONE"
 side="BOTH"
 

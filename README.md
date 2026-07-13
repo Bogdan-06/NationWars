@@ -1,15 +1,26 @@
 # Nation Wars
 
-Development project for Nation Wars 0.3.0.
+Development project for Nation Wars 0.4.0.
 
 Nation Wars is a server-side NeoForge mod providing nations, chunk claims,
 economy, markets, alliances, war, peace deals, doctrine bonuses, and integration
 with Open Parties and Claims.
 
-Version 0.3.0 adds nation guarantees, full spy agencies and missions, `/wars`,
-the `LimitedDoctrines` gamerule, development commands, war bed protection, and
-respawn capture lockouts. The original update specifications and spy UI
-reference are preserved under `docs/specifications`.
+Version 0.4.0 adds `/configurate`, nation upgrades, invitations, leave/kick
+rules, 20-minute truces, the `/nation trade` UI with recurring passive-income
+terms, configurable espionage/factions/guarantees/peace/claiming/trading rules,
+natural coast detection, and doctrine balance changes. The original update
+specifications and spy UI reference are preserved under `docs/specifications`.
+
+Use `/configurate` as an operator to review server settings. Examples:
+`/configurate LimitedDoctrines t`, `/configurate DisableEspionage false`,
+`/configurate ClaimNether true`, `/configurate Colonialism false`, and
+`/configurate SpawnProtection 200`.
+
+Use `/nation upgrade` to buy up to four upgrade levels. Each level adds five
+free claims and $6/minute of capital income. Use
+`/alliance truce offer <country>` to propose a 20-minute non-aggression pact;
+either nation can propose renewal before it expires.
 
 Use `/spy mission` to choose a stationed country, mission, and required chunks
 through an inventory interface. Scout missions allow selecting three chunks and
@@ -27,8 +38,12 @@ primary files are preserved instead of being overwritten.
 
 - Java 21
 - Minecraft 1.21.1
-- NeoForge 21.1.227 or newer
+- NeoForge 21.1.227 or newer for Minecraft 1.21.1
 - Open Parties and Claims 0.27.5 through 0.27.x
+
+Players need the Nation Wars resources on their client (normally by installing
+the same Nation Wars JAR) for English, Romanian, or Spanish text to follow their
+selected Minecraft language. Dedicated-server gameplay remains authoritative.
 
 ## Build
 

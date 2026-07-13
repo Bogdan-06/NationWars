@@ -119,8 +119,8 @@ extends AbstractContainerMenu {
         List<NationStore.Nation> nations = NationStore.get().nationsSorted();
         if (nations.isEmpty()) {
             ItemStack empty = new ItemStack((ItemLike)Items.BARRIER);
-            empty.set(DataComponents.CUSTOM_NAME, Component.literal((String)"No nations yet"));
-            empty.set(DataComponents.LORE, new ItemLore(List.of(Component.literal((String)"Use /nation create to start one."))));
+            empty.set(DataComponents.CUSTOM_NAME, NationText.tr("nationwars.gui.nations.empty"));
+            empty.set(DataComponents.LORE, new ItemLore(List.of(NationText.tr("nationwars.gui.nations.empty_lore"))));
             this.nationsContainer.setItem(22, empty);
             return;
         }
@@ -133,11 +133,11 @@ extends AbstractContainerMenu {
             ++slot;
         }
         if (this.page > 0) {
-            this.nationsContainer.setItem(45, control(Items.ARROW.getDefaultInstance(), "Previous page"));
+            this.nationsContainer.setItem(45, control(Items.ARROW.getDefaultInstance(), NationText.tr("nationwars.gui.common.previous_page")));
         }
-        this.nationsContainer.setItem(49, control(Items.WRITABLE_BOOK.getDefaultInstance(), "Nations page " + (this.page + 1) + "/" + pageCount));
+        this.nationsContainer.setItem(49, control(Items.WRITABLE_BOOK.getDefaultInstance(), NationText.tr("nationwars.gui.nations.page", this.page + 1, pageCount)));
         if (this.page + 1 < pageCount) {
-            this.nationsContainer.setItem(53, control(Items.ARROW.getDefaultInstance(), "Next page"));
+            this.nationsContainer.setItem(53, control(Items.ARROW.getDefaultInstance(), NationText.tr("nationwars.gui.common.next_page")));
         }
     }
 
@@ -146,8 +146,8 @@ extends AbstractContainerMenu {
         return Math.max(1, (count + PAGE_SIZE - 1) / PAGE_SIZE);
     }
 
-    private static ItemStack control(ItemStack stack, String name) {
-        stack.set(DataComponents.CUSTOM_NAME, Component.literal(name));
+    private static ItemStack control(ItemStack stack, Component name) {
+        stack.set(DataComponents.CUSTOM_NAME, name);
         return stack;
     }
 
@@ -157,20 +157,20 @@ extends AbstractContainerMenu {
         ItemStack stack = new ItemStack((ItemLike)NationIcons.countryBlock(nation.doctrine()));
         stack.set(DataComponents.CUSTOM_NAME, Component.literal((String)nation.name));
         List<Component> lore = new ArrayList<>();
-        lore.add(Component.literal((String)("Command ID: " + nation.id)));
-        lore.add(Component.literal((String)("Leader: " + nation.ownerName)));
-        lore.add(Component.literal((String)("Claims: " + store.claimCount(nation))));
-        lore.add(Component.literal((String)("Members: " + nation.members.size())));
-        lore.add(Component.literal((String)("Cities: " + nation.cityClaims.size())));
-        lore.add(Component.literal((String)("Treasury: $" + NationStore.roundMoney(nation.balance))));
-        store.allianceOf(nation).ifPresent(alliance -> lore.add(Component.literal((String)("Alliance: " + alliance.name))));
+        lore.add(NationText.tr("nationwars.gui.nations.command_id", nation.id));
+        lore.add(NationText.tr("nationwars.gui.nations.leader", nation.ownerName));
+        lore.add(NationText.tr("nationwars.gui.nations.claims", store.claimCount(nation)));
+        lore.add(NationText.tr("nationwars.gui.nations.members", nation.members.size()));
+        lore.add(NationText.tr("nationwars.gui.nations.cities", nation.cityClaims.size()));
+        lore.add(NationText.tr("nationwars.gui.nations.treasury", NationStore.roundMoney(nation.balance)));
+        store.allianceOf(nation).ifPresent(alliance -> lore.add(NationText.tr("nationwars.gui.nations.alliance", alliance.name)));
         if (nation.capitalClaim != null && !nation.capitalClaim.isBlank()) {
-            lore.add(Component.literal((String)("Capital: " + ClaimKey.parse(nation.capitalClaim).shortName())));
+            lore.add(NationText.tr("nationwars.gui.nations.capital", ClaimKey.parse(nation.capitalClaim).shortName()));
         }
         if ((activeWars = store.activeWarsOf(nation).size()) > 0) {
-            lore.add(Component.literal((String)("Active wars: " + activeWars)));
+            lore.add(NationText.tr("nationwars.gui.nations.active_wars", activeWars));
         }
-        lore.add(Component.literal((String)"Click for details"));
+        lore.add(NationText.tr("nationwars.gui.common.click_details"));
         stack.set(DataComponents.LORE, new ItemLore(lore));
         return stack;
     }
@@ -184,14 +184,14 @@ extends AbstractContainerMenu {
         NationStore.Nation nation = store.nationById(nationId).orElse(null);
         if (nation == null) {
             this.refreshAndSync();
-            player.sendSystemMessage((Component)Component.literal((String)"[NationWars] That nation no longer exists."));
+            player.sendSystemMessage(NationText.message("nationwars.gui.nations.error.gone"));
             return;
         }
-        player.sendSystemMessage((Component)Component.literal((String)("[NationWars] " + nation.name)));
-        player.sendSystemMessage((Component)Component.literal((String)("Command ID: " + nation.id)));
-        player.sendSystemMessage((Component)Component.literal((String)("Leader: " + nation.ownerName + " | claims: " + store.claimCount(nation) + " | members: " + nation.members.size() + " | treasury: $" + NationStore.roundMoney(nation.balance))));
+        player.sendSystemMessage(NationText.message("nationwars.gui.nations.details_header", nation.name));
+        player.sendSystemMessage(NationText.tr("nationwars.gui.nations.command_id", nation.id));
+        player.sendSystemMessage(NationText.tr("nationwars.gui.nations.details", nation.ownerName, store.claimCount(nation), nation.members.size(), NationStore.roundMoney(nation.balance)));
         if (nation.capitalClaim != null && !nation.capitalClaim.isBlank()) {
-            player.sendSystemMessage((Component)Component.literal((String)("Capital: " + ClaimKey.parse(nation.capitalClaim).shortName())));
+            player.sendSystemMessage(NationText.tr("nationwars.gui.nations.capital", ClaimKey.parse(nation.capitalClaim).shortName()));
         }
     }
 

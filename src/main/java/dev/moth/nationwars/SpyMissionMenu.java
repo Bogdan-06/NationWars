@@ -154,7 +154,7 @@ public final class SpyMissionMenu extends AbstractContainerMenu {
         }
         if (slot == 49 && this.selectedMission != null && this.selectedMission.chunkCount() == 3) {
             if (this.selectedChunks.size() != 3) {
-                player.sendSystemMessage(Component.literal("[NationWars] Select exactly three chunks before confirming."));
+                player.sendSystemMessage(NationText.message("nationwars.spy.error.select_three"));
                 return;
             }
             if (SpyCommands.launchMission(player, this.targetId, this.selectedMission.id(), List.copyOf(this.selectedChunks))) {
@@ -174,7 +174,7 @@ public final class SpyMissionMenu extends AbstractContainerMenu {
         }
         if (!this.selectedChunks.remove(claimId)) {
             if (this.selectedChunks.size() >= 3) {
-                player.sendSystemMessage(Component.literal("[NationWars] Scout missions use exactly three chunks. Deselect one first."));
+                player.sendSystemMessage(NationText.message("nationwars.spy.error.scout_limit"));
                 return;
             }
             this.selectedChunks.add(claimId);
@@ -198,7 +198,7 @@ public final class SpyMissionMenu extends AbstractContainerMenu {
         NationStore store = NationStore.get();
         NationStore.Nation nation = store.nationOf(this.playerInventory.player.getUUID()).orElse(null);
         if (nation == null || nation.spyAgency == null) {
-            this.setMessage(22, Items.BARRIER, "No spy agency", "Create one with /spy create.");
+            this.setMessage(22, Items.BARRIER, NationText.tr("nationwars.gui.spy.no_agency"), NationText.tr("nationwars.gui.spy.no_agency_lore"));
             return;
         }
         Set<String> stationedCountries = new LinkedHashSet<>();
@@ -218,23 +218,23 @@ public final class SpyMissionMenu extends AbstractContainerMenu {
             ItemStack stack = new ItemStack(NationIcons.countryBlock(target.doctrine()));
             stack.set(DataComponents.CUSTOM_NAME, Component.literal(target.name));
             stack.set(DataComponents.LORE, new ItemLore(List.of(
-                Component.literal("Stationed spies: " + spies),
-                Component.literal("Claims: " + store.claimCount(target)),
-                Component.literal("Click to choose a mission")
+                NationText.tr("nationwars.gui.spy_mission.stationed", spies),
+                NationText.tr("nationwars.gui.nations.claims", store.claimCount(target)),
+                NationText.tr("nationwars.gui.spy_mission.choose_mission")
             )));
             this.container.setItem(slot, stack);
             this.targetSlots[slot] = target.id;
             ++slot;
         }
         if (slot == 0) {
-            this.setMessage(22, Items.BARRIER, "No stationed spies", "Use /spy set <country> <amount>, then wait for arrival.");
+            this.setMessage(22, Items.BARRIER, NationText.tr("nationwars.gui.spy_mission.no_stationed"), NationText.tr("nationwars.gui.spy_mission.no_stationed_lore"));
         }
         if (this.targetPage > 0) {
-            this.setMessage(45, Items.ARROW, "Previous countries", "Page " + this.targetPage + " of " + pageCount);
+            this.setMessage(45, Items.ARROW, NationText.tr("nationwars.gui.spy_mission.previous_countries"), NationText.tr("nationwars.gui.common.page_of", this.targetPage, pageCount));
         }
-        this.setMessage(49, Items.SPYGLASS, "Choose a country", "Page " + (this.targetPage + 1) + "/" + pageCount + ". Only stationed countries are shown.");
+        this.setMessage(49, Items.SPYGLASS, NationText.tr("nationwars.gui.spy_mission.choose_country"), NationText.tr("nationwars.gui.spy_mission.country_page", this.targetPage + 1, pageCount));
         if (this.targetPage + 1 < pageCount) {
-            this.setMessage(53, Items.ARROW, "Next countries", "Page " + (this.targetPage + 2) + " of " + pageCount);
+            this.setMessage(53, Items.ARROW, NationText.tr("nationwars.gui.spy_mission.next_countries"), NationText.tr("nationwars.gui.common.page_of", this.targetPage + 2, pageCount));
         }
     }
 
@@ -260,25 +260,28 @@ public final class SpyMissionMenu extends AbstractContainerMenu {
             return;
         }
         int slot = 0;
+        boolean domestic = own.id.equals(target.id);
         for (SpyCommands.MissionOption mission : SpyCommands.missionOptions()) {
-            if ("counterspy".equals(mission.id()) && !own.id.equals(target.id)) {
+            boolean counterspy = "counterspy".equals(mission.id());
+            if (domestic != counterspy) {
                 continue;
             }
             ItemStack stack = new ItemStack(iconFor(mission.id()));
-            stack.set(DataComponents.CUSTOM_NAME, Component.literal(displayMissionName(mission.id())));
+            stack.set(DataComponents.CUSTOM_NAME, displayMissionName(mission.id()));
             List<Component> lore = new ArrayList<>();
-            lore.add(Component.literal("Country: " + target.name));
-            lore.add(Component.literal("Cost: $" + NationStore.roundMoney(mission.cost())));
-            lore.add(Component.literal("Time: " + mission.seconds() + "s"));
-            lore.add(Component.literal("Failure risk: " + mission.failurePercent() + "%"));
-            lore.add(Component.literal(mission.chunkCount() == 0 ? "No chunk selection needed" : mission.chunkCount() == 1 ? "Choose one chunk after clicking" : "Choose three chunks after clicking"));
+            lore.add(NationText.tr("nationwars.gui.spy_mission.country", target.name));
+            lore.add(NationText.tr("nationwars.gui.spy_mission.cost", NationStore.roundMoney(mission.cost())));
+            lore.add(NationText.tr("nationwars.gui.spy_mission.time", mission.seconds()));
+            lore.add(NationText.tr("nationwars.gui.spy_mission.failure", mission.failurePercent()));
+            lore.add(NationText.tr(mission.chunkCount() == 0 ? "nationwars.gui.spy_mission.no_chunk"
+                : mission.chunkCount() == 1 ? "nationwars.gui.spy_mission.one_chunk" : "nationwars.gui.spy_mission.three_chunks"));
             stack.set(DataComponents.LORE, new ItemLore(lore));
             this.container.setItem(slot, stack);
             this.missionSlots[slot] = mission;
             ++slot;
         }
-        this.setMessage(45, Items.ARROW, "Back to countries", "Click to choose a different country.");
-        this.setMessage(49, NationIcons.countryBlock(target.doctrine()), target.name, "Choose a mission above.");
+        this.setMessage(45, Items.ARROW, NationText.tr("nationwars.gui.spy_mission.back_countries"), NationText.tr("nationwars.gui.spy_mission.back_countries_lore"));
+        this.setMessage(49, NationIcons.countryBlock(target.doctrine()), Component.literal(target.name), NationText.tr("nationwars.gui.spy_mission.choose_above"));
     }
 
     private void refreshChunks() {
@@ -302,25 +305,26 @@ public final class SpyMissionMenu extends AbstractContainerMenu {
             stack.set(DataComponents.LORE, new ItemLore(List.of(
                 Component.literal(claim.dimension()),
                 Component.literal(target.name),
-                Component.literal(selected ? "Selected — click to remove" : "Click to select")
+                NationText.tr(selected ? "nationwars.gui.spy_mission.selected_remove" : "nationwars.gui.spy_mission.click_select")
             )));
             this.container.setItem(slot, stack);
             this.chunkSlots[slot] = claimId;
         }
         if (claims.isEmpty()) {
-            this.setMessage(22, Items.BARRIER, "No claims available", target.name + " has no selectable chunks.");
+            this.setMessage(22, Items.BARRIER, NationText.tr("nationwars.gui.spy_mission.no_claims"), NationText.tr("nationwars.gui.spy_mission.no_claims_lore", target.name));
         }
         if (this.page > 0) {
-            this.setMessage(45, Items.ARROW, "Previous page", "Page " + this.page + " of " + this.pageCount());
+            this.setMessage(45, Items.ARROW, NationText.tr("nationwars.gui.common.previous_page"), NationText.tr("nationwars.gui.common.page_of", this.page, this.pageCount()));
         }
-        this.setMessage(46, Items.BARRIER, "Back to missions", "Click to choose a different mission.");
+        this.setMessage(46, Items.BARRIER, NationText.tr("nationwars.gui.spy_mission.back_missions"), NationText.tr("nationwars.gui.spy_mission.back_missions_lore"));
         if (this.selectedMission.chunkCount() == 3) {
-            this.setMessage(49, this.selectedChunks.size() == 3 ? Items.LIME_CONCRETE : Items.GRAY_CONCRETE, "Confirm scout: " + this.selectedChunks.size() + "/3", "Select exactly three chunks.");
+            this.setMessage(49, this.selectedChunks.size() == 3 ? Items.LIME_CONCRETE : Items.GRAY_CONCRETE,
+                NationText.tr("nationwars.gui.spy_mission.confirm_scout", this.selectedChunks.size()), NationText.tr("nationwars.gui.spy_mission.select_three"));
         } else {
-            this.setMessage(49, Items.SPYGLASS, displayMissionName(this.selectedMission.id()), "Click a chunk to launch.");
+            this.setMessage(49, Items.SPYGLASS, displayMissionName(this.selectedMission.id()), NationText.tr("nationwars.gui.spy_mission.click_launch"));
         }
         if (this.page + 1 < this.pageCount()) {
-            this.setMessage(53, Items.ARROW, "Next page", "Page " + (this.page + 2) + " of " + this.pageCount());
+            this.setMessage(53, Items.ARROW, NationText.tr("nationwars.gui.common.next_page"), NationText.tr("nationwars.gui.common.page_of", this.page + 2, this.pageCount()));
         }
     }
 
@@ -330,10 +334,10 @@ public final class SpyMissionMenu extends AbstractContainerMenu {
         return Math.max(1, (claims + CLAIMS_PER_PAGE - 1) / CLAIMS_PER_PAGE);
     }
 
-    private void setMessage(int slot, Item item, String title, String lore) {
+    private void setMessage(int slot, Item item, Component title, Component lore) {
         ItemStack stack = new ItemStack(item);
-        stack.set(DataComponents.CUSTOM_NAME, Component.literal(title));
-        stack.set(DataComponents.LORE, new ItemLore(List.of(Component.literal(lore))));
+        stack.set(DataComponents.CUSTOM_NAME, title);
+        stack.set(DataComponents.LORE, new ItemLore(List.of(lore)));
         this.container.setItem(slot, stack);
     }
 
@@ -359,21 +363,10 @@ public final class SpyMissionMenu extends AbstractContainerMenu {
         };
     }
 
-    private static String displayMissionName(String id) {
-        return switch (id) {
-            case "counterspy" -> "Counterspy";
-            case "doctrine" -> "Reveal doctrine";
-            case "treasury" -> "Reveal treasury";
-            case "members" -> "Reveal members";
-            case "faction" -> "Reveal faction";
-            case "size" -> "Reveal size";
-            case "scout" -> "Scout three chunks";
-            case "infiltrate" -> "Infiltrate";
-            case "paralyze" -> "Paralyze income";
-            case "steal" -> "Steal treasury";
-            case "raid" -> "Raid";
-            default -> id;
-        };
+    private static Component displayMissionName(String id) {
+        return SpyCommands.missionOptions().stream().anyMatch(option -> option.id().equals(id))
+            ? NationText.tr("nationwars.spy.mission." + id + ".display")
+            : Component.literal(id);
     }
 
     private enum Stage {

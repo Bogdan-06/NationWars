@@ -48,8 +48,8 @@ public final class SpyMenu extends AbstractContainerMenu {
         NationStore.Nation nation = store.nationOf(this.playerInventory.player.getUUID()).orElse(null);
         if (nation == null || nation.spyAgency == null) {
             ItemStack empty = Items.BARRIER.getDefaultInstance();
-            empty.set(DataComponents.CUSTOM_NAME, Component.literal("No spy agency"));
-            empty.set(DataComponents.LORE, new ItemLore(List.of(Component.literal("Create one with /spy create."))));
+            empty.set(DataComponents.CUSTOM_NAME, NationText.tr("nationwars.gui.spy.no_agency"));
+            empty.set(DataComponents.LORE, new ItemLore(List.of(NationText.tr("nationwars.gui.spy.no_agency_lore"))));
             this.spyContainer.setItem(22, empty);
             return;
         }
@@ -62,35 +62,42 @@ public final class SpyMenu extends AbstractContainerMenu {
             this.spyContainer.setItem(slot++, displaySpy(store, server, spy));
         }
         ItemStack summary = Items.WRITABLE_BOOK.getDefaultInstance();
-        summary.set(DataComponents.CUSTOM_NAME, Component.literal("Spy agency"));
+        summary.set(DataComponents.CUSTOM_NAME, NationText.tr("nationwars.gui.spy.agency"));
         summary.set(DataComponents.LORE, new ItemLore(List.of(
-            Component.literal("Spies: " + spies.size() + "/" + SpyCommands.maxSpies(nation)),
-            Component.literal("Use /spy mission to open the mission UI.")
+            NationText.tr("nationwars.gui.spy.count", spies.size(), SpyCommands.maxSpies(nation)),
+            NationText.tr("nationwars.gui.spy.mission_hint")
         )));
         this.spyContainer.setItem(49, summary);
     }
 
     private static ItemStack displaySpy(NationStore store, MinecraftServer server, NationStore.SpyUnit spy) {
         ItemStack stack = Items.BOOK.getDefaultInstance();
-        stack.set(DataComponents.CUSTOM_NAME, Component.literal("spy" + spy.id));
+        stack.set(DataComponents.CUSTOM_NAME, NationText.tr("nationwars.gui.spy.unit", spy.id));
         List<Component> lore = new ArrayList<>();
-        lore.add(Component.literal("country: " + countryName(store, spy.country)));
-        lore.add(Component.literal("status: " + spy.status));
-        lore.add(Component.literal("mission: " + (spy.mission.isBlank() ? "none" : spy.mission)));
+        lore.add(NationText.tr("nationwars.gui.spy.country", countryName(store, spy.country)));
+        lore.add(NationText.tr("nationwars.gui.spy.status", translatedStatus(spy.status)));
+        lore.add(NationText.tr("nationwars.gui.spy.mission", spy.mission.isBlank()
+            ? NationText.tr("nationwars.common.none")
+            : NationText.tr("nationwars.spy.mission." + spy.mission + ".name")));
         long seconds = Math.max(0L, (spy.availableTick - NationStore.persistentNow() + 19L) / 20L);
-        lore.add(Component.literal("time left: " + seconds + "s"));
+        lore.add(NationText.tr("nationwars.gui.spy.time_left", seconds));
         if (!spy.targetChunk.isBlank()) {
-            lore.add(Component.literal("chunk: " + shortChunk(spy.targetChunk)));
+            lore.add(NationText.tr("nationwars.gui.spy.chunk", shortChunk(spy.targetChunk)));
         }
         stack.set(DataComponents.LORE, new ItemLore(lore));
         return stack;
     }
 
-    private static String countryName(NationStore store, String id) {
+    private static Component countryName(NationStore store, String id) {
         if (id == null || id.isBlank()) {
-            return "none";
+            return NationText.tr("nationwars.common.none");
         }
-        return store.nationById(id).map(nation -> nation.name).orElse(id);
+        return Component.literal(store.nationById(id).map(nation -> nation.name).orElse(id));
+    }
+
+    private static Component translatedStatus(String status) {
+        String safeStatus = status == null || status.isBlank() ? "idle" : status;
+        return NationText.tr("nationwars.spy.status." + safeStatus);
     }
 
     private static String shortChunk(String id) {

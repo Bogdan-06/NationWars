@@ -125,6 +125,7 @@ configurations {
 
 dependencies {
     implementation "xaero.pac:open-parties-and-claims-neoforge-1.21.1:0.27.5"
+    testImplementation "com.google.code.gson:gson:2.11.0"
     testImplementation "org.junit.jupiter:junit-jupiter:5.11.4"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher:1.11.4"
 

@@ -23,7 +23,7 @@ import net.minecraft.resources.ResourceLocation;
 
 public enum Doctrine {
     GERMAN("GER", "Germany", Ideology.FASCIST, 1.0, 1.0, 1.35, 4, 35, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, false, false, false, false),
-    SOVIET("SOV", "Soviet Union", Ideology.COMMUNIST, 0.8, 1.0, 0.75, 4, 50, 1.0, 1.0, 1.25, 1.0, 1.0, false, false, false, false, false, false, false, false),
+    SOVIET("SOV", "Soviet Union", Ideology.COMMUNIST, 0.8, 1.0, 0.5, 4, 50, 1.0, 1.0, 1.25, 1.0, 1.0, false, false, false, false, false, false, false, false),
     AMERICAN("USA", "United States", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 4, 50, 1.0, 1.0, 0.8, 1.0, 1.0, true, true, true, true, false, false, false, false),
     FRENCH("FRA", "France", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 4, 50, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, false, false, false, false),
     BRITISH("ENG", "United Kingdom", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 6, 50, 1.0, 1.0, 1.0, 1.0, 3.0, false, false, true, false, false, false, false, false),
@@ -132,6 +132,33 @@ public enum Doctrine {
         return this.perkLore;
     }
 
+    boolean usesDefaultDisplayName() {
+        return this.displayName.equals(this.defaultDisplayName);
+    }
+
+    boolean usesDefaultPerkLore() {
+        return this.perkLore.equals(this.defaultPerkLore);
+    }
+
+    String translationStem() {
+        return switch (this.id) {
+            case "GER" -> "germany";
+            case "SOV" -> "soviet_union";
+            case "USA" -> "united_states";
+            case "FRA" -> "france";
+            case "ENG" -> "united_kingdom";
+            case "ITA" -> "italy";
+            case "ROM" -> "romania";
+            default -> this.id.toLowerCase(Locale.ROOT);
+        };
+    }
+
+    List<String> defaultPerkTranslationKeys() {
+        String prefix = "nationwars.doctrine." + this.translationStem() + ".perk.";
+        return java.util.stream.IntStream.range(0, this.defaultPerkLore.size())
+            .mapToObj(index -> prefix + index).toList();
+    }
+
     public void applyOverride(JsonObject json) {
         String nextDisplayName = Doctrine.readString(json, this.displayName, "display_name", "displayName", "name");
         String nextIconItemId = Doctrine.readString(json, this.iconItemId, "icon", "icon_item", "iconItem", "icon_block", "iconBlock");
@@ -224,10 +251,10 @@ public enum Doctrine {
         return switch (id) {
             case "GER" -> List.of("+ Blitzkrieg: enemy claims take 35s to capture", "+ Gleiwitz Incident: war justification is 40s faster", "- War Reparations: claim maintenance costs 1.35x", "- Turing's Bombe: counterspies block only 50% of attacks");
             case "SOV" -> List.of("+ Mother Russia: claims and maintenance cost less", "+ Great Patriotic War: land takes twice as long", "  to conquer unless 2 attackers are present", "- Collectivity: capital produces no passive treasury money", "- Yellow Curtains: buying from market costs more");
-            case "USA" -> List.of("+ Capitalism: pay the claim cost to generate income", "+ Worldwide Economy: lower market prices", "- Pacifism: cannot declare wars", "- Isolation: distance from the capital raises claim cost");
+            case "USA" -> List.of("+ Capitalism: pay claim cost for city income", "  worth 0.25x capital income", "+ Worldwide Economy: market prices are 0.8x", "- Pacifism: cannot declare wars", "- Isolation: distance from the capital raises claim cost");
             case "FRA" -> List.of("+ Spy Master: 5 extra spies costing $300 each", "+ The Maginot Line: your land takes 25s longer to capture", "- Casus Foederis: declining allies costs money", "- No War Support: war-held land maintenance is higher");
-            case "ENG" -> List.of("+ Ports: coast and river claims pay the treasury", "+ Colonies: more starter claims", "- Sea Lion: coast and river claims are captured 10s faster", "- Neville Chamberlain: peace offers cost 3x more");
-            case "ITA" -> List.of("+ Developed Infrastructure: Speed II on owned claims", "  and better random building payouts", "+ Alpes: mountain and hilly claims take 15s longer", "- Push-over: nations with more claims can reject once", "- Civil War: recapturing land takes 10s longer");
+            case "ENG" -> List.of("+ Ports: coast claims pay 0.25x capital income", "+ Colonies: more starter claims", "- Sea Lion: coast claims are captured 10s faster", "- Neville Chamberlain: peace offers cost 3x more");
+            case "ITA" -> List.of("+ Developed Infrastructure: Speed II on owned claims", "  while at peace, Speed I while at war, and", "  better random building payouts", "+ Alpes: mountain and hilly claims take 15s longer", "- Push-over: nations with more claims can reject once", "- Civil War: recapturing land takes 10s longer");
             case "ROM" -> List.of("+ King Michael's Coup: one safe leave per ideology", "+ Flexible Foreign Policy: enemies justify 30s longer", "- Iron Guard: losing a core claim raises maintenance 0.1x", "- Carol II Lifestyle: drains money until all leaves are used");
             default -> List.of();
         };
@@ -251,7 +278,18 @@ public enum Doctrine {
     }
 
     private static double readDouble(JsonObject json, double current, double minimum, String ... keys) {
-        return Math.max(minimum, Doctrine.find(json, keys).map(JsonElement::getAsDouble).orElse(current));
+        Optional<JsonElement> element = Doctrine.find(json, keys);
+        if (element.isEmpty()) {
+            return current;
+        }
+        return Doctrine.finiteAtLeast(element.get().getAsDouble(), minimum, keys[0]);
+    }
+
+    static double finiteAtLeast(double value, double minimum, String field) {
+        if (!Double.isFinite(value)) {
+            throw new IllegalArgumentException(field + " must be a finite number");
+        }
+        return Math.max(minimum, value);
     }
 
     private static boolean readBoolean(JsonObject json, boolean current, String ... keys) {

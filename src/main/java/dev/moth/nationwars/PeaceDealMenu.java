@@ -57,6 +57,7 @@ extends AbstractContainerMenu {
     private final NationStore.Nation ownNation;
     private final NationStore.Nation otherNation;
     private final NationStore.War war;
+    private final NationStore.PeaceDeal incomingSnapshot;
     private final String[] demandedClaimSlots = new String[54];
     private final String[] offeredClaimSlots = new String[54];
     private final Action[] actions = new Action[54];
@@ -77,12 +78,15 @@ extends AbstractContainerMenu {
         NationStore.PeaceDeal pending = war.peaceDeal;
         if (pending != null && ownNation.id.equals(pending.receiver)) {
             this.viewingIncoming = true;
+            this.incomingSnapshot = PeaceDealMenu.copyDeal(pending);
             this.draft = PeaceDealMenu.copyDeal(pending);
         } else if (pending != null && ownNation.id.equals(pending.proposer)) {
             this.viewingIncoming = false;
+            this.incomingSnapshot = null;
             this.draft = PeaceDealMenu.copyDeal(pending);
         } else {
             this.viewingIncoming = false;
+            this.incomingSnapshot = null;
             this.draft = PeaceDealMenu.emptyDeal(ownNation, otherNation);
         }
         this.refresh();
@@ -135,11 +139,15 @@ extends AbstractContainerMenu {
             this.offeredClaimSlots[i] = null;
             this.actions[i] = null;
         }
-        this.dealContainer.setItem(0, PeaceDealMenu.item(Items.PAPER, "Make a demand", List.of(Component.literal((String)("Claims and money you want from " + this.otherNation.name + ".")))));
-        this.dealContainer.setItem(4, PeaceDealMenu.item(Items.BOOK, "Peace Deal", this.dealLore()));
-        this.dealContainer.setItem(8, PeaceDealMenu.item(Items.CHEST, "Make an offer", List.of(Component.literal((String)("Claims and money you give to " + this.otherNation.name + ".")))));
+        this.dealContainer.setItem(0, PeaceDealMenu.item(Items.PAPER,
+            NationText.tr(this.viewingIncoming ? "nationwars.gui.peace.they_demand" : "nationwars.gui.peace.make_demand"),
+            List.of(NationText.tr(this.viewingIncoming ? "nationwars.gui.peace.they_demand_lore" : "nationwars.gui.peace.make_demand_lore", this.otherNation.name))));
+        this.dealContainer.setItem(4, PeaceDealMenu.item(Items.BOOK, NationText.tr("nationwars.gui.peace.title"), this.dealLore()));
+        this.dealContainer.setItem(8, PeaceDealMenu.item(Items.CHEST,
+            NationText.tr(this.viewingIncoming ? "nationwars.gui.peace.they_offer" : "nationwars.gui.peace.make_offer"),
+            List.of(NationText.tr(this.viewingIncoming ? "nationwars.gui.peace.they_offer_lore" : "nationwars.gui.peace.make_offer_lore", this.otherNation.name))));
         for (int slot : List.of(Integer.valueOf(13), Integer.valueOf(22), Integer.valueOf(31), Integer.valueOf(40))) {
-            this.dealContainer.setItem(slot, PeaceDealMenu.item(Items.BLACK_STAINED_GLASS_PANE, " ", List.of()));
+            this.dealContainer.setItem(slot, PeaceDealMenu.item(Items.BLACK_STAINED_GLASS_PANE, Component.literal(" "), List.of()));
         }
         this.drawPageControls();
         this.drawClaimColumn(true);
@@ -149,9 +157,16 @@ extends AbstractContainerMenu {
 
     private void drawClaimColumn(boolean demands) {
         NationStore store = NationStore.get();
-        NationStore.Nation source = demands ? this.otherNation : this.ownNation;
+        NationStore.Nation source = demands ? this.demandSource() : this.offerSource();
         int[] slots = demands ? DEMAND_SLOTS : OFFER_SLOTS;
-        List<String> allClaims = store.borderClaimsOf(source).stream().filter(claimId -> !claimId.equals(source.capitalClaim)).toList();
+        Set<String> selected = demands ? this.draft.demandedClaims : this.draft.offeredClaims;
+        ArrayList<String> allClaims = new ArrayList<>(store.borderClaimsOf(source).stream()
+            .filter(claimId -> !claimId.equals(source.capitalClaim))
+            .filter(claimId -> !store.isClaimCapturedInOtherActiveWar(this.war, claimId)).toList());
+        selected.stream().filter(claimId -> source.id.equals(store.nationOwning(ClaimKey.parse(claimId)).map(owner -> owner.id).orElse("")))
+            .filter(claimId -> !claimId.equals(source.capitalClaim) && !store.isClaimCapturedInOtherActiveWar(this.war, claimId)
+                && !allClaims.contains(claimId)).forEach(allClaims::add);
+        allClaims.sort(String::compareTo);
         int pageCount = Math.max(1, (allClaims.size() + slots.length - 1) / slots.length);
         int selectedPage = demands ? Math.min(this.demandPage, pageCount - 1) : Math.min(this.offerPage, pageCount - 1);
         if (demands) {
@@ -162,21 +177,22 @@ extends AbstractContainerMenu {
         List<String> claims = allClaims.stream().skip((long)selectedPage * slots.length).limit(slots.length).toList();
         if (claims.isEmpty()) {
             int slot = slots[5];
-            String name = demands ? "No demandable border claims" : "No offerable border claims";
-            this.dealContainer.setItem(slot, PeaceDealMenu.item(Items.BARRIER, name, List.of(Component.literal((String)"Capital claims cannot be selected."))));
+            Component name = NationText.tr(demands ? "nationwars.gui.peace.no_demandable" : "nationwars.gui.peace.no_offerable");
+            this.dealContainer.setItem(slot, PeaceDealMenu.item(Items.BARRIER, name, List.of(NationText.tr("nationwars.gui.peace.capital_excluded"))));
             return;
         }
-        Set<String> selected = demands ? this.draft.demandedClaims : this.draft.offeredClaims;
         for (int i = 0; i < claims.size(); ++i) {
             int slot = slots[i];
             String claimId2 = claims.get(i);
             boolean active = selected.contains(claimId2);
             Item icon = active ? Items.FILLED_MAP : Items.MAP;
-            String label = (active ? "Selected: " : "") + (demands ? "Demand " : "Offer ") + ClaimKey.parse(claimId2).shortName();
+            String direction = this.viewingIncoming ? (demands ? "they_demand_claim" : "they_offer_claim") : (demands ? "demand_claim" : "offer_claim");
+            String labelKey = "nationwars.gui.peace." + (active ? "selected_" : "") + direction;
+            Component label = NationText.tr(labelKey, ClaimKey.parse(claimId2).shortName());
             ArrayList<Component> lore = new ArrayList<Component>();
-            lore.add((Component)Component.literal((String)("Owner: " + source.name)));
-            lore.add((Component)Component.literal((String)"Value: 100 score"));
-            lore.add((Component)Component.literal((String)(this.viewingIncoming ? "Incoming deal is read-only." : "Click to toggle.")));
+            lore.add(NationText.tr("nationwars.gui.common.owner", source.name));
+            lore.add(NationText.tr("nationwars.gui.peace.claim_score"));
+            lore.add(NationText.tr(this.viewingIncoming ? "nationwars.gui.peace.read_only" : "nationwars.gui.common.click_toggle"));
             this.dealContainer.setItem(slot, PeaceDealMenu.item(icon, label, lore));
             if (demands) {
                 this.demandedClaimSlots[slot] = claimId2;
@@ -187,47 +203,78 @@ extends AbstractContainerMenu {
     }
 
     private void drawPageControls() {
-        int demandPages = this.claimPageCount(this.otherNation);
-        int offerPages = this.claimPageCount(this.ownNation);
-        this.dealContainer.setItem(1, PeaceDealMenu.item(Items.ARROW, "Previous demands", List.of(Component.literal("Page " + (this.demandPage + 1) + "/" + demandPages))));
+        int demandPages = this.claimPageCount(this.demandSource(), this.draft.demandedClaims);
+        int offerPages = this.claimPageCount(this.offerSource(), this.draft.offeredClaims);
+        this.dealContainer.setItem(1, PeaceDealMenu.item(Items.ARROW, NationText.tr("nationwars.gui.peace.previous_demands"), List.of(NationText.tr("nationwars.gui.common.page", this.demandPage + 1, demandPages))));
         this.actions[1] = Action.DEMAND_PREV;
-        this.dealContainer.setItem(2, PeaceDealMenu.item(Items.ARROW, "Next demands", List.of(Component.literal("Page " + (this.demandPage + 1) + "/" + demandPages))));
+        this.dealContainer.setItem(2, PeaceDealMenu.item(Items.ARROW, NationText.tr("nationwars.gui.peace.next_demands"), List.of(NationText.tr("nationwars.gui.common.page", this.demandPage + 1, demandPages))));
         this.actions[2] = Action.DEMAND_NEXT;
-        this.dealContainer.setItem(6, PeaceDealMenu.item(Items.ARROW, "Previous offers", List.of(Component.literal("Page " + (this.offerPage + 1) + "/" + offerPages))));
+        this.dealContainer.setItem(6, PeaceDealMenu.item(Items.ARROW, NationText.tr("nationwars.gui.peace.previous_offers"), List.of(NationText.tr("nationwars.gui.common.page", this.offerPage + 1, offerPages))));
         this.actions[6] = Action.OFFER_PREV;
-        this.dealContainer.setItem(7, PeaceDealMenu.item(Items.ARROW, "Next offers", List.of(Component.literal("Page " + (this.offerPage + 1) + "/" + offerPages))));
+        this.dealContainer.setItem(7, PeaceDealMenu.item(Items.ARROW, NationText.tr("nationwars.gui.peace.next_offers"), List.of(NationText.tr("nationwars.gui.common.page", this.offerPage + 1, offerPages))));
         this.actions[7] = Action.OFFER_NEXT;
     }
 
-    private int claimPageCount(NationStore.Nation nation) {
-        int claims = (int)NationStore.get().borderClaimsOf(nation).stream().filter(claimId -> !claimId.equals(nation.capitalClaim)).count();
+    private int claimPageCount(NationStore.Nation nation, Set<String> selected) {
+        NationStore store = NationStore.get();
+        Set<String> visible = new java.util.LinkedHashSet<>(store.borderClaimsOf(nation).stream()
+            .filter(claimId -> !claimId.equals(nation.capitalClaim))
+            .filter(claimId -> !store.isClaimCapturedInOtherActiveWar(this.war, claimId)).toList());
+        selected.stream().filter(claimId -> nation.id.equals(store.nationOwning(ClaimKey.parse(claimId)).map(owner -> owner.id).orElse("")))
+            .filter(claimId -> !claimId.equals(nation.capitalClaim) && !store.isClaimCapturedInOtherActiveWar(this.war, claimId)).forEach(visible::add);
+        int claims = visible.size();
         return Math.max(1, (claims + DEMAND_SLOTS.length - 1) / DEMAND_SLOTS.length);
     }
 
+    private NationStore.Nation demandSource() {
+        return NationStore.peaceDemandSource(this.viewingIncoming, this.ownNation, this.otherNation);
+    }
+
+    private NationStore.Nation offerSource() {
+        return NationStore.peaceOfferSource(this.viewingIncoming, this.ownNation, this.otherNation);
+    }
+
     private void drawControls() {
-        this.dealContainer.setItem(45, PeaceDealMenu.item(Items.GOLD_NUGGET, "-$100 Demand", List.of(Component.literal((String)("Demanded reparations: $" + NationStore.roundMoney(this.draft.demandedMoney))))));
-        this.actions[45] = Action.DEMAND_MONEY_DOWN;
-        this.dealContainer.setItem(46, PeaceDealMenu.item(Items.GOLD_INGOT, "+$100 Demand", List.of(Component.literal((String)("Demanded reparations: $" + NationStore.roundMoney(this.draft.demandedMoney))))));
-        this.actions[46] = Action.DEMAND_MONEY_UP;
+        if (this.viewingIncoming) {
+            this.dealContainer.setItem(45, PeaceDealMenu.item(Items.GOLD_INGOT, NationText.tr("nationwars.gui.peace.they_demand_money", NationStore.roundMoney(this.draft.demandedMoney)),
+                List.of(NationText.tr("nationwars.gui.peace.demand_taken"))));
+            this.dealContainer.setItem(46, PeaceDealMenu.item(Items.GRAY_STAINED_GLASS_PANE, NationText.tr("nationwars.gui.peace.terms_read_only"), List.of()));
+        } else {
+            this.dealContainer.setItem(45, PeaceDealMenu.item(Items.GOLD_NUGGET, NationText.tr("nationwars.gui.peace.demand_down"), List.of(NationText.tr("nationwars.gui.peace.demanded_reparations", NationStore.roundMoney(this.draft.demandedMoney)))));
+            this.actions[45] = Action.DEMAND_MONEY_DOWN;
+            this.dealContainer.setItem(46, PeaceDealMenu.item(Items.GOLD_INGOT, NationText.tr("nationwars.gui.peace.demand_up"), List.of(NationText.tr("nationwars.gui.peace.demanded_reparations", NationStore.roundMoney(this.draft.demandedMoney)))));
+            this.actions[46] = Action.DEMAND_MONEY_UP;
+        }
         int returnable = this.returnableCapturedClaims();
-        this.dealContainer.setItem(47, PeaceDealMenu.item(this.draft.returnCapturedClaims ? Items.LIME_BANNER : Items.WHITE_BANNER, "Return captured claims", List.of(Component.literal((String)("Captured claims: " + returnable)), Component.literal((String)(this.draft.returnCapturedClaims ? "Included in this deal." : "Click to toggle.")))));
+        this.dealContainer.setItem(47, PeaceDealMenu.item(this.draft.returnCapturedClaims ? Items.LIME_BANNER : Items.WHITE_BANNER,
+            NationText.tr("nationwars.gui.peace.return_captured"), List.of(NationText.tr("nationwars.gui.wars.captured", returnable),
+                NationText.tr(this.draft.returnCapturedClaims ? "nationwars.gui.peace.included" : "nationwars.gui.common.click_toggle"))));
         this.actions[47] = Action.RETURN_CAPTURED;
         if (this.viewingIncoming) {
-            this.dealContainer.setItem(48, PeaceDealMenu.item(Items.WRITABLE_BOOK, "Make counteroffer", List.of(Component.literal((String)"Start a new deal from your side."))));
+            this.dealContainer.setItem(48, PeaceDealMenu.item(Items.WRITABLE_BOOK, NationText.tr("nationwars.gui.peace.counteroffer"), List.of(NationText.tr("nationwars.gui.peace.counteroffer_lore"))));
             this.actions[48] = Action.COUNTER_OR_CLEAR;
-            this.dealContainer.setItem(49, PeaceDealMenu.item(Items.EMERALD_BLOCK, "Accept peace deal", List.of(Component.literal((String)"Applies the shown terms and ends the war."))));
+            this.dealContainer.setItem(49, PeaceDealMenu.item(Items.EMERALD_BLOCK, NationText.tr("nationwars.gui.peace.accept"), List.of(NationText.tr("nationwars.gui.peace.accept_lore"))));
             this.actions[49] = Action.PRIMARY;
         } else {
-            this.dealContainer.setItem(48, PeaceDealMenu.item(Items.REDSTONE, "Clear draft", List.of(Component.literal((String)"Remove all selected terms."))));
+            this.dealContainer.setItem(48, PeaceDealMenu.item(Items.REDSTONE, NationText.tr("nationwars.gui.trade.clear"), List.of(NationText.tr("nationwars.gui.trade.clear_lore"))));
             this.actions[48] = Action.COUNTER_OR_CLEAR;
-            this.dealContainer.setItem(49, PeaceDealMenu.item(Items.EMERALD, this.primaryLabel(), List.of(Component.literal((String)("Sends this deal to " + this.otherNation.name + ".")), Component.literal((String)("Offer fee: $" + NationStore.roundMoney(this.peaceOfferFee()))), Component.literal((String)(PeaceDealMenu.isEmptyDeal(this.draft) ? "No terms means white peace." : PeaceDealMenu.summary(this.draft))))));
+            this.dealContainer.setItem(49, PeaceDealMenu.item(Items.EMERALD, this.primaryLabel(), List.of(
+                NationText.tr("nationwars.gui.peace.sends_to", this.otherNation.name),
+                NationText.tr("nationwars.gui.peace.offer_fee", NationStore.roundMoney(this.peaceOfferFee())),
+                PeaceDealMenu.isEmptyDeal(this.draft) ? NationText.tr("nationwars.gui.peace.white_peace_lore") : PeaceDealMenu.summary(this.draft))));
             this.actions[49] = Action.PRIMARY;
         }
-        this.dealContainer.setItem(51, PeaceDealMenu.item(Items.GOLD_INGOT, "+$100 Offer", List.of(Component.literal((String)("Offered reparations: $" + NationStore.roundMoney(this.draft.offeredMoney))))));
-        this.actions[51] = Action.OFFER_MONEY_UP;
-        this.dealContainer.setItem(52, PeaceDealMenu.item(Items.GOLD_NUGGET, "-$100 Offer", List.of(Component.literal((String)("Offered reparations: $" + NationStore.roundMoney(this.draft.offeredMoney))))));
-        this.actions[52] = Action.OFFER_MONEY_DOWN;
-        this.dealContainer.setItem(53, PeaceDealMenu.item(Items.BARRIER, "Close", List.of()));
+        if (this.viewingIncoming) {
+            this.dealContainer.setItem(51, PeaceDealMenu.item(Items.GOLD_INGOT, NationText.tr("nationwars.gui.peace.they_offer_money", NationStore.roundMoney(this.draft.offeredMoney)),
+                List.of(NationText.tr("nationwars.gui.peace.offer_paid"))));
+            this.dealContainer.setItem(52, PeaceDealMenu.item(Items.GRAY_STAINED_GLASS_PANE, NationText.tr("nationwars.gui.peace.terms_read_only"), List.of()));
+        } else {
+            this.dealContainer.setItem(51, PeaceDealMenu.item(Items.GOLD_INGOT, NationText.tr("nationwars.gui.peace.offer_up"), List.of(NationText.tr("nationwars.gui.peace.offered_reparations", NationStore.roundMoney(this.draft.offeredMoney)))));
+            this.actions[51] = Action.OFFER_MONEY_UP;
+            this.dealContainer.setItem(52, PeaceDealMenu.item(Items.GOLD_NUGGET, NationText.tr("nationwars.gui.peace.offer_down"), List.of(NationText.tr("nationwars.gui.peace.offered_reparations", NationStore.roundMoney(this.draft.offeredMoney)))));
+            this.actions[52] = Action.OFFER_MONEY_DOWN;
+        }
+        this.dealContainer.setItem(53, PeaceDealMenu.item(Items.BARRIER, NationText.tr("nationwars.gui.common.close"), List.of()));
         this.actions[53] = Action.CLOSE;
     }
 
@@ -238,7 +285,7 @@ extends AbstractContainerMenu {
             return;
         }
         if (this.viewingIncoming) {
-            player.sendSystemMessage((Component)Component.literal((String)"[NationWars] Click Make counteroffer before editing terms."));
+            player.sendSystemMessage(NationText.message("nationwars.peace.error.counteroffer_first"));
             return;
         }
         String demandedClaim = this.demandedClaimSlots[slotIndex];
@@ -257,7 +304,7 @@ extends AbstractContainerMenu {
     private void handleAction(ServerPlayer player, Action action) {
         if (this.viewingIncoming && action != Action.PRIMARY && action != Action.COUNTER_OR_CLEAR && action != Action.CLOSE
             && action != Action.DEMAND_PREV && action != Action.DEMAND_NEXT && action != Action.OFFER_PREV && action != Action.OFFER_NEXT) {
-            player.sendSystemMessage((Component)Component.literal((String)"[NationWars] Click Make counteroffer before editing terms."));
+            player.sendSystemMessage(NationText.message("nationwars.peace.error.counteroffer_first"));
             return;
         }
         switch (action.ordinal()) {
@@ -283,6 +330,10 @@ extends AbstractContainerMenu {
                 break;
             }
             case 5: {
+                if (this.viewingIncoming && !this.currentIncomingMatches()) {
+                    this.refuseStaleIncoming(player);
+                    return;
+                }
                 this.viewingIncoming = false;
                 this.draft = PeaceDealMenu.emptyDeal(this.ownNation, this.otherNation);
                 break;
@@ -304,7 +355,7 @@ extends AbstractContainerMenu {
                 break;
             }
             case 9: {
-                this.demandPage = Math.min(this.claimPageCount(this.otherNation) - 1, this.demandPage + 1);
+                this.demandPage = Math.min(this.claimPageCount(this.demandSource(), this.draft.demandedClaims) - 1, this.demandPage + 1);
                 break;
             }
             case 10: {
@@ -312,7 +363,7 @@ extends AbstractContainerMenu {
                 break;
             }
             case 11: {
-                this.offerPage = Math.min(this.claimPageCount(this.ownNation) - 1, this.offerPage + 1);
+                this.offerPage = Math.min(this.claimPageCount(this.offerSource(), this.draft.offeredClaims) - 1, this.offerPage + 1);
                 break;
             }
         }
@@ -320,27 +371,37 @@ extends AbstractContainerMenu {
     }
 
     private void sendDeal(ServerPlayer player) {
-        NationStore store = NationStore.get();
-        if (!store.isOwner(player.getUUID(), this.ownNation) || store.nationById(this.ownNation.id).isEmpty()) {
-            player.sendSystemMessage(Component.literal("[NationWars] Only the current nation owner can send this peace deal."));
+        if (NationWarsConfig.get().noMercy) {
+            player.sendSystemMessage(NationText.message("nationwars.peace.error.disabled"));
             player.closeContainer();
             return;
         }
-        if (!(this.war.active && store.isWarParticipant(this.war, this.ownNation) && store.isWarParticipant(this.war, this.otherNation))) {
-            player.sendSystemMessage((Component)Component.literal((String)"[NationWars] That war is no longer active."));
+        if (this.incomingSnapshot != null && !this.currentIncomingMatches()) {
+            this.refuseStaleIncoming(player);
+            return;
+        }
+        NationStore store = NationStore.get();
+        if (!store.isCurrentNation(this.ownNation) || !store.isCurrentNation(this.otherNation)
+            || !store.isOwner(player.getUUID(), this.ownNation)) {
+            player.sendSystemMessage(NationText.message("nationwars.peace.error.owner_send"));
+            player.closeContainer();
+            return;
+        }
+        if (!(store.isCurrentActiveWar(this.war) && store.isWarParticipant(this.war, this.ownNation) && store.isWarParticipant(this.war, this.otherNation))) {
+            player.sendSystemMessage(NationText.message("nationwars.peace.error.war_inactive"));
             player.closeContainer();
             return;
         }
         NationStore.PeaceDeal existing = this.war.peaceDeal;
         if (existing != null && !(this.ownNation.id.equals(existing.proposer) && this.otherNation.id.equals(existing.receiver)
             || this.ownNation.id.equals(existing.receiver) && this.otherNation.id.equals(existing.proposer))) {
-            player.sendSystemMessage(Component.literal("[NationWars] Another pair in this multi-nation war already has a pending peace deal."));
+            player.sendSystemMessage(NationText.message("nationwars.peace.error.other_pair"));
             return;
         }
         long cooldownUntil = store.peaceCooldownUntil(this.ownNation, this.otherNation);
         if (cooldownUntil > NationStore.persistentNow()) {
             long secondsLeft = Math.max(1L, (cooldownUntil - NationStore.persistentNow()) / 20L);
-            player.sendSystemMessage((Component)Component.literal((String)("[NationWars] Your last peace offer was rejected. Try again in " + secondsLeft + " seconds.")));
+            player.sendSystemMessage(NationText.message("nationwars.peace.error.cooldown", secondsLeft));
             return;
         }
         NationStore.PeaceDeal sent = PeaceDealMenu.copyDeal(this.draft);
@@ -348,58 +409,75 @@ extends AbstractContainerMenu {
         sent.receiver = this.otherNation.id;
         double fee = this.peaceOfferFee();
         if (store.isSpendingBlocked(this.ownNation, NationStore.persistentNow())) {
-            player.sendSystemMessage(Component.literal("[NationWars] Your capital is infiltrated; treasury spending is currently blocked."));
+            player.sendSystemMessage(NationText.message("nationwars.peace.error.spending_blocked"));
             return;
         }
         if (this.ownNation.balance + 1.0E-4 < fee) {
-            player.sendSystemMessage((Component)Component.literal((String)("[NationWars] Nation treasury needs $" + NationStore.roundMoney(fee) + " to send this peace deal.")));
+            player.sendSystemMessage(NationText.message("nationwars.peace.error.fee", NationStore.roundMoney(fee)));
             return;
         }
         this.ownNation.balance = NationStore.roundMoney(this.ownNation.balance - fee);
-        store.setPeaceDeal(this.war, sent);
-        store.notifyNation(player.getServer(), this.otherNation, (Component)Component.literal((String)("[NationWars] " + this.ownNation.name + " sent a peace deal: " + PeaceDealMenu.summary(sent) + " Use /peace " + this.ownNation.id + " to review it.")));
-        store.notifyNation(player.getServer(), this.ownNation, (Component)Component.literal((String)("[NationWars] Peace deal sent to " + this.otherNation.name + ".")));
+        if (!store.setPeaceDeal(this.war, sent)) {
+            this.ownNation.balance = NationStore.roundMoney(this.ownNation.balance + fee);
+            player.sendSystemMessage(NationText.message("nationwars.peace.error.changed"));
+            player.closeContainer();
+            return;
+        }
+        store.notifyNation(player.getServer(), this.otherNation, NationText.message("nationwars.peace.sent_received", this.ownNation.name, PeaceDealMenu.summary(sent), this.ownNation.id));
+        store.notifyNation(player.getServer(), this.ownNation, NationText.message("nationwars.peace.sent", this.otherNation.name));
         player.closeContainer();
     }
 
     private void acceptDeal(ServerPlayer player) {
+        if (NationWarsConfig.get().noMercy) {
+            player.sendSystemMessage(NationText.message("nationwars.peace.error.disabled"));
+            player.closeContainer();
+            return;
+        }
         NationStore store = NationStore.get();
-        if (!store.isOwner(player.getUUID(), this.ownNation) || store.nationById(this.ownNation.id).isEmpty()) {
-            player.sendSystemMessage(Component.literal("[NationWars] Only the current nation owner can accept this peace deal."));
+        if (!store.isCurrentNation(this.ownNation) || !store.isCurrentNation(this.otherNation)
+            || !store.isOwner(player.getUUID(), this.ownNation)) {
+            player.sendSystemMessage(NationText.message("nationwars.peace.error.owner_accept"));
             player.closeContainer();
             return;
         }
         NationStore.PeaceDeal pending = this.war.peaceDeal;
         if (pending == null || !this.ownNation.id.equals(pending.receiver)) {
-            player.sendSystemMessage((Component)Component.literal((String)"[NationWars] That peace deal is no longer available."));
+            player.sendSystemMessage(NationText.message("nationwars.peace.error.unavailable"));
             player.closeContainer();
+            return;
+        }
+        if (!PeaceDealMenu.sameDeal(this.incomingSnapshot, pending)) {
+            this.refuseStaleIncoming(player);
             return;
         }
         NationStore.Nation proposer = store.nationById(pending.proposer).orElse(this.otherNation);
         NationStore.Nation receiver = store.nationById(pending.receiver).orElse(this.ownNation);
         if (!store.applyPeaceDeal(this.war, pending)) {
-            player.sendSystemMessage((Component)Component.literal((String)"[NationWars] Could not apply that deal. Check claim ownership and treasuries."));
+            player.sendSystemMessage(NationText.message("nationwars.peace.error.apply"));
             this.refreshAndSync();
             return;
         }
-        store.notifyNation(player.getServer(), proposer, (Component)Component.literal((String)("[NationWars] " + receiver.name + " accepted the peace deal.")));
-        store.notifyNation(player.getServer(), receiver, (Component)Component.literal((String)("[NationWars] Peace deal accepted with " + proposer.name + ".")));
+        store.notifyNation(player.getServer(), proposer, NationText.message("nationwars.peace.accepted_by", receiver.name));
+        store.notifyNation(player.getServer(), receiver, NationText.message("nationwars.peace.accepted_with", proposer.name));
         player.closeContainer();
     }
 
     private List<Component> dealLore() {
         ArrayList<Component> lore = new ArrayList<Component>();
-        lore.add((Component)Component.literal((String)(this.ownNation.name + " <-> " + this.otherNation.name)));
-        lore.add((Component)Component.literal((String)(this.viewingIncoming ? "Incoming proposal from " + this.otherNation.name : "Draft from " + this.ownNation.name)));
-        lore.add((Component)Component.literal((String)("Demand score: " + (int)this.demandScore())));
-        lore.add((Component)Component.literal((String)("Offer score: " + (int)this.offerScore())));
-        lore.add((Component)Component.literal((String)("Net score: " + (int)(this.demandScore() - this.offerScore()))));
-        lore.add((Component)Component.literal((String)PeaceDealMenu.summary(this.draft)));
+        lore.add(NationText.tr("nationwars.gui.common.between", this.ownNation.name, this.otherNation.name));
+        lore.add(NationText.tr(this.viewingIncoming ? "nationwars.gui.common.incoming_from" : "nationwars.gui.common.draft_from",
+            this.viewingIncoming ? this.otherNation.name : this.ownNation.name));
+        lore.add(NationText.tr(this.viewingIncoming ? "nationwars.gui.peace.they_demand_score" : "nationwars.gui.peace.demand_score", (int)this.demandScore()));
+        lore.add(NationText.tr(this.viewingIncoming ? "nationwars.gui.peace.they_offer_score" : "nationwars.gui.peace.offer_score", (int)this.offerScore()));
+        lore.add(NationText.tr(this.viewingIncoming ? "nationwars.gui.peace.net_cost" : "nationwars.gui.peace.net_score", (int)(this.demandScore() - this.offerScore())));
+        lore.add(PeaceDealMenu.summary(this.draft));
         return lore;
     }
 
-    private String primaryLabel() {
-        return this.war.peaceDeal != null && this.ownNation.id.equals(this.war.peaceDeal.proposer) ? "Replace sent deal" : "Send peace deal";
+    private Component primaryLabel() {
+        return NationText.tr(this.war.peaceDeal != null && this.ownNation.id.equals(this.war.peaceDeal.proposer)
+            ? "nationwars.gui.peace.replace" : "nationwars.gui.peace.send");
     }
 
     private double demandScore() {
@@ -423,6 +501,15 @@ extends AbstractContainerMenu {
         this.broadcastChanges();
     }
 
+    private boolean currentIncomingMatches() {
+        return PeaceDealMenu.sameDeal(this.incomingSnapshot, this.war.peaceDeal);
+    }
+
+    private void refuseStaleIncoming(ServerPlayer player) {
+        player.sendSystemMessage(NationText.message("nationwars.peace.error.stale"));
+        player.closeContainer();
+    }
+
     private static void toggle(Set<String> selected, String claimId) {
         if (!selected.remove(claimId)) {
             selected.add(claimId);
@@ -433,24 +520,24 @@ extends AbstractContainerMenu {
         return deal.demandedClaims.isEmpty() && deal.offeredClaims.isEmpty() && deal.demandedMoney <= 0.0 && deal.offeredMoney <= 0.0 && !deal.returnCapturedClaims;
     }
 
-    private static String summary(NationStore.PeaceDeal deal) {
-        List<String> parts = new ArrayList<>();
+    private static Component summary(NationStore.PeaceDeal deal) {
+        List<Component> parts = new ArrayList<>();
         if (!deal.demandedClaims.isEmpty()) {
-            parts.add("demands " + deal.demandedClaims.size() + " claims");
+            parts.add(NationText.tr("nationwars.peace.summary.demands_claims", deal.demandedClaims.size()));
         }
         if (deal.demandedMoney > 0.0) {
-            parts.add("demands $" + NationStore.roundMoney(deal.demandedMoney));
+            parts.add(NationText.tr("nationwars.peace.summary.demands_money", NationStore.roundMoney(deal.demandedMoney)));
         }
         if (!deal.offeredClaims.isEmpty()) {
-            parts.add("offers " + deal.offeredClaims.size() + " claims");
+            parts.add(NationText.tr("nationwars.peace.summary.offers_claims", deal.offeredClaims.size()));
         }
         if (deal.offeredMoney > 0.0) {
-            parts.add("offers $" + NationStore.roundMoney(deal.offeredMoney));
+            parts.add(NationText.tr("nationwars.peace.summary.offers_money", NationStore.roundMoney(deal.offeredMoney)));
         }
         if (deal.returnCapturedClaims) {
-            parts.add("returns captured claims");
+            parts.add(NationText.tr("nationwars.peace.summary.returns_captured"));
         }
-        return parts.isEmpty() ? "white peace" : String.join(", ", parts);
+        return parts.isEmpty() ? NationText.tr("nationwars.peace.summary.white") : NationText.join(parts);
     }
 
     private static NationStore.PeaceDeal emptyDeal(NationStore.Nation proposer, NationStore.Nation receiver) {
@@ -472,9 +559,20 @@ extends AbstractContainerMenu {
         return copy;
     }
 
-    private static ItemStack item(Item item, String name, List<Component> lore) {
+    private static boolean sameDeal(NationStore.PeaceDeal expected, NationStore.PeaceDeal current) {
+        return expected != null && current != null
+            && expected.proposer.equals(current.proposer)
+            && expected.receiver.equals(current.receiver)
+            && expected.demandedClaims.equals(current.demandedClaims)
+            && expected.offeredClaims.equals(current.offeredClaims)
+            && Double.compare(expected.demandedMoney, current.demandedMoney) == 0
+            && Double.compare(expected.offeredMoney, current.offeredMoney) == 0
+            && expected.returnCapturedClaims == current.returnCapturedClaims;
+    }
+
+    private static ItemStack item(Item item, Component name, List<Component> lore) {
         ItemStack stack = new ItemStack((ItemLike)item);
-        stack.set(DataComponents.CUSTOM_NAME, Component.literal((String)name));
+        stack.set(DataComponents.CUSTOM_NAME, name);
         if (!lore.isEmpty()) {
             stack.set(DataComponents.LORE, new ItemLore(lore));
         }
