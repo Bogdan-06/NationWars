@@ -116,6 +116,7 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
@@ -126,13 +127,15 @@ import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import xaero.pac.common.server.api.OpenPACServerAPI;
 import dev.moth.nationwars.service.EconomyService;
+import dev.moth.nationwars.service.ClaimProtectionRules;
+import dev.moth.nationwars.service.PuppetRules;
 import dev.moth.nationwars.service.WarService;
 
 public final class NationEvents {
-    private static final int INCOME_INTERVAL_TICKS = 1200;
+    static final int INCOME_INTERVAL_TICKS = 12000;
     private static final int MAINTENANCE_INTERVAL_TICKS = 12000;
     private static final double ACCESS_FEE = 50.0;
-    private static final double BUILD_REWARD = 5.0;
+    private static final double BUILD_REWARD = 2.0;
     private static final double BUILD_REWARD_CHANCE = 0.2;
     private static final long ACTION_ACCESS_PASS_TICKS = 2L;
     private static final int OPAC_SYNC_RETRY_INTERVAL_TICKS = 200;
@@ -175,7 +178,7 @@ public final class NationEvents {
         NationEvents.migrateNaturalCoastClaims(event.getServer());
         NationEvents.refreshAllTabListNames(event.getServer());
         long tick = event.getServer().getTickCount();
-        nextIncomeTick = tick + 1200L;
+        nextIncomeTick = tick + INCOME_INTERVAL_TICKS;
         nextMaintenanceTick = tick + 12000L;
         NationEvents.scheduleOpacSync(tick + 100L, 3);
     }
@@ -199,7 +202,7 @@ public final class NationEvents {
         MinecraftServer server = event.getServer();
         long tick = server.getTickCount();
         if (nextIncomeTick < 0L) {
-            nextIncomeTick = tick + 1200L;
+            nextIncomeTick = tick + INCOME_INTERVAL_TICKS;
         }
         if (nextMaintenanceTick < 0L) {
             nextMaintenanceTick = tick + 12000L;
@@ -210,7 +213,7 @@ public final class NationEvents {
         }
         if (tick >= nextIncomeTick) {
             NationEvents.payPassiveIncome(server);
-            nextIncomeTick = tick + 1200L;
+            nextIncomeTick = tick + INCOME_INTERVAL_TICKS;
         }
         if (tick >= nextMaintenanceTick) {
             NationEvents.chargeMaintenance(server);
@@ -458,12 +461,16 @@ public final class NationEvents {
             return;
         }
         BlockState state = level.getBlockState(pos);
-        if (!NationEvents.isPaidAccessBlock(state.getBlock())) {
-            return;
-        }
         NationStore store = NationStore.get();
         Optional<NationStore.Nation> owner = store.nationOwning(claim = ClaimKey.of(level, new ChunkPos(pos)));
         if (owner.isEmpty() || store.isMember(player2.getUUID(), owner.get())) {
+            return;
+        }
+        if (NationEvents.shouldDisableClaimProtectionFor(player2, owner.get(), tick)) {
+            NationEvents.grantActionOpacPass(player2, tick);
+            return;
+        }
+        if (!NationEvents.isPaidAccessBlock(state.getBlock())) {
             return;
         }
         if (store.isRaidActive(claim.id(), NationStore.persistentNow())) {
@@ -478,10 +485,14 @@ public final class NationEvents {
         }
         if (NationEvents.isActiveWarClaim(player2, owner.get())) {
             if (NationEvents.isWarRespawnLocked(player2, tick)) {
+                event.setCancellationResult(InteractionResult.FAIL);
+                event.setCanceled(true);
                 player2.displayClientMessage(NationText.tr("nationwars.war.actions_respawn_timer"), true);
                 return;
             }
-            NationEvents.grantActionOpacPass(player2, tick);
+            event.setCancellationResult(InteractionResult.FAIL);
+            event.setCanceled(true);
+            player2.displayClientMessage(NationText.tr("nationwars.war.scorched_earth.interact_blocked"), true);
             return;
         }
         String cooldownKey = String.valueOf(player2.getUUID()) + ":" + pos.asLong();
@@ -506,13 +517,89 @@ public final class NationEvents {
         }
     }
 
+    @SubscribeEvent(priority=EventPriority.HIGHEST)
+    public static void leftClickBlockAccess(PlayerInteractEvent.LeftClickBlock event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            NationEvents.grantClaimActionPassIfNeeded(player, event.getPos(), player.getServer().getTickCount());
+        }
+    }
+
+    @SubscribeEvent(priority=EventPriority.LOWEST, receiveCanceled=true)
+    public static void leftClickBlockCleanup(PlayerInteractEvent.LeftClickBlock event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            NationEvents.revokeTemporaryOpacPass(player);
+        }
+    }
+
+    @SubscribeEvent(priority=EventPriority.HIGHEST)
+    public static void entityInteractAccess(PlayerInteractEvent.EntityInteract event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            NationEvents.grantClaimActionPassIfNeeded(player, event.getTarget().blockPosition(), player.getServer().getTickCount());
+        }
+    }
+
+    @SubscribeEvent(priority=EventPriority.LOWEST, receiveCanceled=true)
+    public static void entityInteractCleanup(PlayerInteractEvent.EntityInteract event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            NationEvents.revokeTemporaryOpacPass(player);
+        }
+    }
+
+    @SubscribeEvent(priority=EventPriority.HIGHEST)
+    public static void entityInteractSpecificAccess(PlayerInteractEvent.EntityInteractSpecific event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            NationEvents.grantClaimActionPassIfNeeded(player, event.getTarget().blockPosition(), player.getServer().getTickCount());
+        }
+    }
+
+    @SubscribeEvent(priority=EventPriority.LOWEST, receiveCanceled=true)
+    public static void entityInteractSpecificCleanup(PlayerInteractEvent.EntityInteractSpecific event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            NationEvents.revokeTemporaryOpacPass(player);
+        }
+    }
+
+    @SubscribeEvent(priority=EventPriority.HIGHEST)
+    public static void attackEntityAccess(AttackEntityEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            NationEvents.grantClaimActionPassIfNeeded(player, event.getTarget().blockPosition(), player.getServer().getTickCount());
+        }
+    }
+
+    @SubscribeEvent(priority=EventPriority.LOWEST, receiveCanceled=true)
+    public static void attackEntityCleanup(AttackEntityEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            NationEvents.revokeTemporaryOpacPass(player);
+        }
+    }
+
     private static void payPassiveIncome(MinecraftServer server) {
         NationStore store = NationStore.get();
         Map<String, NationStore.Nation> nationsById = new LinkedHashMap<String, NationStore.Nation>();
         Map<String, Double> grossIncome = new LinkedHashMap<String, Double>();
         for (NationStore.Nation nation : store.nations()) {
             nationsById.put(nation.id, nation);
-            grossIncome.put(nation.id, Math.max(0.0, NationEvents.passiveIncomePerMinute(store, nation)));
+            grossIncome.put(nation.id, Math.max(0.0, NationEvents.currentIncomePerCycle(store, nation)));
+        }
+
+        Map<String, Double> puppetTaxes = new HashMap<>();
+        Map<String, Double> puppetTaxIncome = new HashMap<>();
+        if (NationWarsConfig.get().puppets) {
+            for (NationStore.Nation puppet : store.nations()) {
+                NationStore.PuppetRelation relation = store.puppetRelation(puppet).orElse(null);
+                NationStore.Nation master = relation == null ? null : nationsById.get(relation.master);
+                if (master == null) {
+                    continue;
+                }
+                double tax = Math.min(grossIncome.getOrDefault(puppet.id, 0.0),
+                    PuppetRules.puppetTax(grossIncome.getOrDefault(puppet.id, 0.0)));
+                if (tax <= 0.0) {
+                    continue;
+                }
+                puppetTaxes.put(puppet.id, tax);
+                puppetTaxIncome.merge(master.id, tax,
+                    (first, second) -> NationStore.roundMoney(first + second));
+            }
         }
 
         Map<String, List<NationStore.IncomeTransfer>> transfersByPayer = new LinkedHashMap<String, List<NationStore.IncomeTransfer>>();
@@ -530,7 +617,8 @@ public final class NationEvents {
         Map<String, Double> incoming = new HashMap<String, Double>();
         for (Map.Entry<String, List<NationStore.IncomeTransfer>> entry : transfersByPayer.entrySet()) {
             List<NationStore.IncomeTransfer> transfers = entry.getValue();
-            double available = grossIncome.getOrDefault(entry.getKey(), 0.0);
+            double available = Math.max(0.0, grossIncome.getOrDefault(entry.getKey(), 0.0)
+                - puppetTaxes.getOrDefault(entry.getKey(), 0.0));
             double obligation = transfers.stream().mapToDouble(transfer -> transfer.amountPerMinute).sum();
             if (available <= 0.0 || obligation <= 0.0) {
                 continue;
@@ -552,17 +640,15 @@ public final class NationEvents {
         for (NationStore.Nation nation : store.nations()) {
             double generated = grossIncome.getOrDefault(nation.id, 0.0);
             double received = incoming.getOrDefault(nation.id, 0.0);
-            double diverted = Math.min(generated, outgoing.getOrDefault(nation.id, 0.0));
-            nation.balance = NationStore.roundMoney(nation.balance + generated - diverted + received);
+            double puppetTax = Math.min(generated, puppetTaxes.getOrDefault(nation.id, 0.0));
+            double diverted = Math.min(Math.max(0.0, generated - puppetTax), outgoing.getOrDefault(nation.id, 0.0));
+            double taxReceived = puppetTaxIncome.getOrDefault(nation.id, 0.0);
+            nation.balance = NationStore.roundMoney(nation.balance + generated - puppetTax - diverted + received + taxReceived);
         }
         store.save();
     }
 
-    static double passiveIncomePerTenMinutes(NationStore store, NationStore.Nation nation) {
-        return NationStore.roundMoney(NationEvents.passiveIncomePerMinute(store, nation) * 10.0);
-    }
-
-    private static double passiveIncomePerMinute(NationStore store, NationStore.Nation nation) {
+    static double currentIncomePerCycle(NationStore store, NationStore.Nation nation) {
         long tick = NationStore.persistentNow();
         List<String> ownedClaims = store.claimsOf(nation);
         boolean capitalActive = nation.capitalClaim != null && !nation.capitalClaim.isBlank()
@@ -571,15 +657,15 @@ public final class NationEvents {
             .filter(claimId -> !store.isClaimParalyzed(claimId, tick) && store.isCoastClaim(claimId)).count();
         int activeCities = (int)nation.cityClaims.stream()
             .filter(ownedClaims::contains).filter(claimId -> !store.isClaimParalyzed(claimId, tick)).count();
-        return EconomyService.passiveIncomePerMinute(nation.doctrine(), nation.upgradeLevel,
-            capitalActive, activeCoasts, activeCities);
+        return EconomyService.currentIncomePerCycle(nation.doctrine(), nation.upgradeLevel,
+            capitalActive, activeCoasts, activeCities, nation.members.size());
     }
 
-    static double capitalIncomePerMinute(NationStore.Nation nation) {
+    static double capitalIncomePerCycle(NationStore.Nation nation) {
         if (nation == null) {
             return 0.0;
         }
-        return EconomyService.capitalIncomePerMinute(nation.doctrine(), nation.upgradeLevel);
+        return EconomyService.capitalIncomePerCycle(nation.doctrine(), nation.upgradeLevel);
     }
 
     static double maintenanceDuePerInterval(NationStore store, NationStore.Nation nation) {
@@ -685,6 +771,21 @@ public final class NationEvents {
                 NationEvents.removeCapture(progressKey);
                 return;
             }
+            if (store.isIndependenceWar(war) && (capitalCaptured || store.claimCount(defender.get()) <= 0)) {
+                NationStore.Nation puppet = store.nationById(war.independencePuppet).orElse(null);
+                NationStore.Nation master = puppet == null ? null : store.masterOf(puppet).orElse(null);
+                boolean puppetWon = master != null && defender.get().id.equals(master.id);
+                NationStore.IndependenceResolution resolution = store.resolveIndependenceWar(war, puppetWon);
+                if (resolution.resolved() && puppet != null && master != null) {
+                    String resultKey = puppetWon ? "nationwars.puppet.war.puppet_victory" : "nationwars.puppet.war.master_victory";
+                    store.notifyNation(player.getServer(), puppet,
+                        NationText.message(resultKey, puppet.name, master.name, resolution.points(), resolution.lostWars()));
+                    store.notifyNation(player.getServer(), master,
+                        NationText.message(resultKey, puppet.name, master.name, resolution.points(), resolution.lostWars()));
+                }
+                NationEvents.removeCapture(progressKey);
+                return;
+            }
             if (store.claimCount(defender.get()) <= 0) {
                 NationEvents.eliminateNation(player.getServer(), store, war, attacker.get(), defender.get());
                 NationEvents.removeCapture(progressKey);
@@ -706,7 +807,8 @@ public final class NationEvents {
         NationStore store = NationStore.get();
         return WarService.captureSeconds(attacker.doctrine(), defender.doctrine(), store.isCoastClaim(claim.id()),
             NationEvents.isHillOrMountainClaim(player.serverLevel(), claim),
-            store.isCapturedClaimTracked(war, claim.id()), NationEvents.attackersPresent(player, war, attacker));
+            store.isCapturedClaimTracked(war, claim.id()) && store.isCoreClaimForWar(war, attacker, claim.id()),
+            NationEvents.attackersPresent(player, war, attacker));
     }
 
     private static boolean isCoastOrRiverClaim(ServerLevel level, ClaimKey claim) {
@@ -1078,8 +1180,7 @@ public final class NationEvents {
             NationEvents.grantActionOpacPass(player, tick);
             return false;
         }
-        if (NationEvents.isActiveWarClaim(player, owner.get()) && !NationEvents.isPeacePendingWarClaim(player, owner.get())
-            && NationWarsConfig.get().scorchedEarth && !NationEvents.isWarRespawnLocked(player, tick)) {
+        if (NationEvents.shouldDisableClaimProtectionFor(player, owner.get(), tick)) {
             NationEvents.grantActionOpacPass(player, tick);
             return false;
         }
@@ -1098,10 +1199,7 @@ public final class NationEvents {
             NationEvents.grantActionOpacPass(player, tick);
             return;
         }
-        Optional<NationStore.Nation> own = store.nationOf(player.getUUID());
-        if (own.isPresent() && NationWarsConfig.get().scorchedEarth
-            && store.activeWarForCapture(own.get(), owner.get()).filter(war -> war.peaceDeal == null).isPresent()
-            && !NationEvents.isWarRespawnLocked(player, tick)) {
+        if (NationEvents.shouldDisableClaimProtectionFor(player, owner.get(), tick)) {
             NationEvents.grantActionOpacPass(player, tick);
         }
     }
@@ -1120,9 +1218,21 @@ public final class NationEvents {
         if (own.isEmpty()) {
             return false;
         }
-        return store.isMember(player.getUUID(), owner.get()) || NationWarsConfig.get().scorchedEarth
-            && store.activeWarForCapture(own.get(), owner.get()).filter(war -> war.peaceDeal == null).isPresent()
-            && !NationEvents.isWarRespawnLocked(player, player.getServer().getTickCount());
+        return store.isMember(player.getUUID(), owner.get())
+            || NationEvents.shouldDisableClaimProtectionFor(player, owner.get(), player.getServer().getTickCount());
+    }
+
+    private static boolean shouldDisableClaimProtectionFor(ServerPlayer player, NationStore.Nation owner, long tick) {
+        NationStore store = NationStore.get();
+        NationStore.Nation own = store.nationOf(player.getUUID()).orElse(null);
+        NationStore.War war = own == null || own.id.equals(owner.id)
+            ? null
+            : store.activeWarForCapture(own, owner).orElse(null);
+        return ClaimProtectionRules.disableForEnemyWarClaim(
+            NationWarsConfig.get().scorchedEarth,
+            war != null,
+            war != null && war.peaceDeal != null,
+            NationEvents.isWarRespawnLocked(player, tick));
     }
 
     private static boolean shouldBlockScorchedEarthAction(ServerPlayer player, ServerLevel level, BlockPos pos, long tick) {

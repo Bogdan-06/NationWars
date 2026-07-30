@@ -1,24 +1,40 @@
 # Nation Wars
 
-Development project for Nation Wars 0.4.0.
+Development project for Nation Wars 0.5.0.
 
 Nation Wars is a server-side NeoForge mod providing nations, chunk claims,
 economy, markets, alliances, war, peace deals, doctrine bonuses, and integration
 with Open Parties and Claims.
 
-Version 0.4.0 adds `/configurate`, nation upgrades, invitations, leave/kick
-rules, 20-minute truces, the `/nation trade` UI with recurring passive-income
-terms, configurable espionage/factions/guarantees/peace/claiming/trading rules,
-natural coast detection, and doctrine balance changes. The original update
-specifications and spy UI reference are preserved under `docs/specifications`.
+Version 0.5.0 adds voluntary and peace-deal puppeting, independence points,
+independence wars, manual release/annexation, and a 20% puppet-income tax. It
+also changes the passive-income payout to $120 every ten minutes plus $8 for
+each member after the first, adds the capital chunk and current payout to
+`/nation info`, streamlines
+nation creation, and applies the doctrine changes listed in the changelog.
 
-Use `/configurate` as an operator to review server settings. Examples:
-`/configurate LimitedDoctrines t`, `/configurate DisableEspionage false`,
-`/configurate ClaimNether true`, `/configurate Colonialism false`, and
-`/configurate SpawnProtection 200`.
+Use `/configure` as an operator to review server settings. Examples:
+`/configure LimitedDoctrines t`, `/configure DisableEspionage false`,
+`/configure Puppets true`, `/configure Colonialism false`, and
+`/configure SpawnProtection 200`. The old `/configurate` spelling and the
+misspelled `Satelites` setting alias are no longer registered; the correctly
+spelled `/configure Satellites` setting remains available.
+
+Use `/nation create` to open the doctrine menu, then enter the new nation's
+name in chat. The former direct `<name> [doctrine]` arguments are intentionally
+disabled. `/nations` is also disabled for this version; `/nation info` and the
+other nation-management commands remain available.
+
+Nation owners use `/puppet` to view their status and direct puppets. The command
+tree includes `propose`, `accept`, `reject`, `pacify`, `agitate`, `liberate`,
+`automate`, `release`, `annex`, and `war`. A new puppet starts at 100
+independence points. Claiming starts at 50 points, an independence war requires
+more than 150, peaceful liberation requires 200, and annexation requires 0
+points or three lost independence wars. Thresholds only unlock the matching
+command; liberation and annexation are never automatic.
 
 Use `/nation upgrade` to buy up to four upgrade levels. Each level adds five
-free claims and $6/minute of capital income. Use
+free claims and $6 per ten-minute income cycle. Use
 `/alliance truce offer <country>` to propose a 20-minute non-aggression pact;
 either nation can propose renewal before it expires.
 
@@ -42,8 +58,9 @@ primary files are preserved instead of being overwritten.
 - Open Parties and Claims 0.27.5 through 0.27.x
 
 Players need the Nation Wars resources on their client (normally by installing
-the same Nation Wars JAR) for English, Romanian, or Spanish text to follow their
-selected Minecraft language. Dedicated-server gameplay remains authoritative.
+the same Nation Wars JAR) for English, Romanian, Spanish, or Polish text to
+follow their selected Minecraft language. Dedicated-server gameplay remains
+authoritative.
 
 ## Build
 
@@ -69,9 +86,14 @@ Regression tests:
 
 ## Development commands
 
-Operators can use `/nwdev` (or `/nationwarsdev`) to set player money, set a
-nation treasury, change a doctrine, finish spy timers, save data, or synchronize
-OPAC claims.
+Permission-level-4 operators can use `/nwdev` (or `/nationwarsdev`) to set
+player money, set a nation treasury, change a doctrine, finish spy timers, save
+data, or synchronize OPAC claims. Permission-level-4 operators can use
+`/configure deletenation <country>` for an audited administrative deletion;
+this command is not controlled by the debug-command toggle. Destructive
+development commands still require
+`debugCommandsEnabled=true` in `nationwars-technical.toml`; the production
+default is disabled.
 
 ## Doctrine IDs
 

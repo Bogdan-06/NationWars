@@ -54,9 +54,9 @@ final class NationStoreTest {
 
     @Test
     void upgradeIncomeHandlesNormalSovietAndAmericanNations() {
-        assertEquals(36.0, NationRules.capitalIncome("GER", 4));
+        assertEquals(144.0, NationRules.capitalIncome("GER", 4));
         assertEquals(24.0, NationRules.capitalIncome("SOV", 4));
-        assertEquals(12.0, NationRules.capitalIncome("USA", 4));
+        assertEquals(120.0, NationRules.capitalIncome("USA", 4));
     }
 
     @Test

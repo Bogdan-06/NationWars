@@ -14,7 +14,9 @@ tasks.named('wrapper', Wrapper).configure {
     distributionType = Wrapper.DistributionType.BIN
 }
 
-version = mod_version
+// Resolve the release version through a tracked Gradle property so copied
+// configuration caches cannot retain the previous version's archive name.
+version = providers.gradleProperty('mod_version').get()
 group = mod_group_id
 
 sourceSets.main.resources {

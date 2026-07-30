@@ -1,0 +1,48 @@
+CHECKLIST 9 - 0.5
+------------
+
+- DEV - Add /nation delete <country> to dev commands
+
+- GEN - Set a new passive income rule for all countries per cycle: ($120 × doctrine income multiplier) + (member count - 1) × $8
+
+- DEV - Fix dev commands not showing up
+
+- GEN - Add the capital chunk to /nation info
+
+- GEN - Add Puppet system (more info in another file)
+
+- CONFIG - Add Puppets [t/f] (true default) to the /configure command - Enables/disables puppets.
+
+- CONFIG - Delete "/configurate" command
+
+- CONFIG - Delete "Satelites" from /configure
+
+- GEN - Remove "<name> [doctrine]" from /nation create
+
+- GEN - Disable /nations for now. - I WILL EXPLAIN LATER
+
+- ITA - Edit Push-over: nations with more claims can reject your war declaration once
+
+- ITA - Edit Civil War: recapturing core claims takes 10s longer
+
+- ITA - Change the building payout amount to $2
+
+- USA - Edit Capitalism: pay the claim cost to generate 0.2x worth of capital income
+
+- ENG - Edit Ports: coast claims produce 0.1x of the capital income.
+
+- ITA - Rename "Civil War" to "Kingdom of the South"
+
+- SOV - Edit Collectivity: capital doesn't produce passive income at start, though it can still be upgraded. (note for lumi: The Count of members still works, meaning $0 + (4-1) × 8 = $24/min)
+
+- GENERAL - Create "betrayal" rule - If you decline the defense of allied/guaranteed by you nation, you pay $250 penalty.
+
+- FRA - Edit No War Support: Maintenance is raised to 1.5x when you declare war. (defensive wars do not apply)
+
+- FRA - Edit Casus Foederis: declining defending allies and guatantees costs 3x as much as normal.
+
+- SOV - Edit Yellow Curtains: buying from market costs 1.25x the normal price.
+
+- SOV - Edit Great Patriotic War: Your land takes twice as long to conquer unless 2 enemies players are present.
+
+- ROM - Edit Iron Guard: losing a core claim raises maintenance by 0.1x (stacks)

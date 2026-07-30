@@ -1,0 +1,11 @@
+FIX 0.5
+
+- CONFIG - Make the claim protection go COMPLETELY OFF at war when ScorchedEarth is active
+
+- GEN - change income from every minute to every 10 minutes
+
+- GEN - make /nation info show CURRENT income
+
+- CONFIG - move delete nation to /configure as "/configure deletenation [country]"
+
+- CONFIG - Fix deleting nation not working

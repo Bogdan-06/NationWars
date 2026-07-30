@@ -51,6 +51,7 @@ public final class NationWarsConfig {
     public boolean claimEnd = false;
     public boolean colonialism = false;
     public boolean allowTrade = true;
+    public boolean puppets = true;
     public int spawnProtection = 200;
     public Set<String> disabledDoctrines = new LinkedHashSet<String>();
 

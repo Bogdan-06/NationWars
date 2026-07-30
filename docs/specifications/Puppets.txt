@@ -1,0 +1,91 @@
+THE PUPPET SYSTEM
+-----------------
+
+The "puppet" option will be now visible in peace deals.
+
+INDEPENDENCE
+
+Country that has been puppeted has 2 options to become independent:
+
+- Independence Points - the slow way
+Puppet can trade with other nations, reject trades from the master, and once every 10 minutes it can perform /puppet agitate to gain points. (agitate is +10, every deal with foreign nation is +1, every rejected offer from the master is +1). Master however can lower the independence points by making puppet-favoured trades, and using /puppet pacify <country> every 10 minutes. EVERYTHING THAT GIVES/TAKES INDEPENDENCE POINTS WORKS EVERY 120s. THE TRADES CAN STILL BE DONE, HOWEVER THEY WILL NOT IMPACT THE INDEPENDENCE POINTS.
+Puppet starts with 100 independence points, if it reaches 200, it becomes independent peacefully without war. If it reaches 0, the puppet gets annexed by the master. (Only by using commands: /puppet liberate, /puppet annex <country>)
+
+- Independence War - the fast but risky way
+Puppet can start an independence war with the master with the command /puppet war, in order to do that puppet needs more than 150 independence points. If puppet wins the war (peace deal accepted by the master, master surrendered, master capitulated) PUPPET WILL NOT GAIN ANY ADDITIONAL TERRITORY FROM THE MASTER, IT ONLY BECOMES INDEPENDENT. If puppet loses the war, it loses 50 independence points. While at war, independence points are frozen they cannot be manipulated. THERE CAN ONLY BE 3 INDEPENDENCE WARS, AFTER THE 3RD ONE IS LOST, MASTER IS ABLE TO ANNEX THE PUPPET BYPASSING THE INDEPENDENCE POINTS COUNT.
+
+RULES
+
+1. Puppet cannot declare wars on other countries. (except the master)
+
+2. Master cannot declare war on their puppet.
+
+3. Master can release puppet by using /puppet release <country>
+
+4. Master will not automatically annex their puppet, in order to do that it has to use /puppet annex <country>
+
+5. Puppet will not automatically gain independence from independence points reaching 200, in order to do that it has to use /puppet automate
+
+6. If country that has puppets gets annexed/puppeted, all of it's puppets gain independence
+
+7. Country can asks others to become it's puppet.
+
+8. Country can have more than 1 puppet.
+
+9. Master takes 0.2x of puppet's national income.
+
+COMMANDS (/puppet - prefix)
+
+/puppet propose <country> - asks foreign country to become your puppet
+
+/puppet pacify <country> - Takes 10 independence points away from selected puppet.
+
+/puppet agitate - Gives you 10 independence points.
+
+/puppet liberate - You become independent from the master.
+
+/puppet annex <country> - Annexes selected puppet.
+
+/puppet war - declares war on the master.
+
+POINTS RULES
+
+0
+
+Can be annexed = true
+Can claim = False
+Can declare independence war = false
+Can peacefully declare independence = false
+---------------------------------------------
+
+1-49
+
+Can be annexed = false
+Can claim = False
+Can declare independence war = false
+Can peacefully declare independence = false
+---------------------------------------------
+
+50-150
+
+Can be annexed = false
+Can claim = True
+Can declare independence war = false
+Can peacefully declare independence = false
+---------------------------------------------
+
+151-199
+
+Can be annexed = false
+Can claim = True
+Can declare independence war = True
+Can peacefully declare independence = false
+---------------------------------------------
+
+200
+
+Can be annexed = false
+Can claim = True
+Can declare independence war = True
+Can peacefully declare independence = True
+---------------------------------------------

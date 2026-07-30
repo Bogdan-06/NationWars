@@ -264,6 +264,7 @@ extends AbstractContainerMenu {
                 PeaceDealMenu.isEmptyDeal(this.draft) ? NationText.tr("nationwars.gui.peace.white_peace_lore") : PeaceDealMenu.summary(this.draft))));
             this.actions[49] = Action.PRIMARY;
         }
+        this.drawPuppetTerm();
         if (this.viewingIncoming) {
             this.dealContainer.setItem(51, PeaceDealMenu.item(Items.GOLD_INGOT, NationText.tr("nationwars.gui.peace.they_offer_money", NationStore.roundMoney(this.draft.offeredMoney)),
                 List.of(NationText.tr("nationwars.gui.peace.offer_paid"))));
@@ -276,6 +277,28 @@ extends AbstractContainerMenu {
         }
         this.dealContainer.setItem(53, PeaceDealMenu.item(Items.BARRIER, NationText.tr("nationwars.gui.common.close"), List.of()));
         this.actions[53] = Action.CLOSE;
+    }
+
+    private void drawPuppetTerm() {
+        if (!NationWarsConfig.get().puppets || this.war.independenceWar) {
+            return;
+        }
+        boolean available = this.viewingIncoming || NationStore.get().canEstablishPuppet(this.ownNation, this.otherNation);
+        Component name = NationText.tr(this.draft.puppetReceiver
+            ? "nationwars.gui.peace.puppet.enabled"
+            : "nationwars.gui.peace.puppet.disabled");
+        ArrayList<Component> lore = new ArrayList<>();
+        lore.add(NationText.tr("nationwars.gui.peace.puppet.term", this.viewingIncoming ? this.ownNation.name : this.otherNation.name));
+        if (this.viewingIncoming) {
+            lore.add(NationText.tr("nationwars.gui.peace.puppet.read_only"));
+        } else if (available || this.draft.puppetReceiver) {
+            lore.add(NationText.tr("nationwars.gui.peace.puppet.click_toggle"));
+            this.actions[50] = Action.PUPPET_RECEIVER;
+        } else {
+            lore.add(NationText.tr("nationwars.gui.peace.puppet.unavailable"));
+        }
+        this.dealContainer.setItem(50, PeaceDealMenu.item(
+            this.draft.puppetReceiver ? Items.LIME_BANNER : Items.WHITE_BANNER, name, lore));
     }
 
     private void handleTopClick(ServerPlayer player, int slotIndex) {
@@ -366,6 +389,14 @@ extends AbstractContainerMenu {
                 this.offerPage = Math.min(this.claimPageCount(this.offerSource(), this.draft.offeredClaims) - 1, this.offerPage + 1);
                 break;
             }
+            case 12: {
+                if (!this.draft.puppetReceiver && !NationStore.get().canEstablishPuppet(this.ownNation, this.otherNation)) {
+                    player.sendSystemMessage(NationText.message("nationwars.gui.peace.puppet.error_unavailable"));
+                    return;
+                }
+                this.draft.puppetReceiver = !this.draft.puppetReceiver;
+                break;
+            }
         }
         this.refreshAndSync();
     }
@@ -390,6 +421,12 @@ extends AbstractContainerMenu {
         if (!(store.isCurrentActiveWar(this.war) && store.isWarParticipant(this.war, this.ownNation) && store.isWarParticipant(this.war, this.otherNation))) {
             player.sendSystemMessage(NationText.message("nationwars.peace.error.war_inactive"));
             player.closeContainer();
+            return;
+        }
+        if (this.draft.puppetReceiver && (!NationWarsConfig.get().puppets || this.war.independenceWar
+            || !store.canEstablishPuppet(this.ownNation, this.otherNation))) {
+            player.sendSystemMessage(NationText.message("nationwars.gui.peace.puppet.error_unavailable"));
+            this.refreshAndSync();
             return;
         }
         NationStore.PeaceDeal existing = this.war.peaceDeal;
@@ -517,7 +554,8 @@ extends AbstractContainerMenu {
     }
 
     private static boolean isEmptyDeal(NationStore.PeaceDeal deal) {
-        return deal.demandedClaims.isEmpty() && deal.offeredClaims.isEmpty() && deal.demandedMoney <= 0.0 && deal.offeredMoney <= 0.0 && !deal.returnCapturedClaims;
+        return deal.demandedClaims.isEmpty() && deal.offeredClaims.isEmpty() && deal.demandedMoney <= 0.0 && deal.offeredMoney <= 0.0
+            && !deal.returnCapturedClaims && !deal.puppetReceiver;
     }
 
     private static Component summary(NationStore.PeaceDeal deal) {
@@ -536,6 +574,9 @@ extends AbstractContainerMenu {
         }
         if (deal.returnCapturedClaims) {
             parts.add(NationText.tr("nationwars.peace.summary.returns_captured"));
+        }
+        if (deal.puppetReceiver) {
+            parts.add(NationText.tr("nationwars.gui.peace.puppet.summary"));
         }
         return parts.isEmpty() ? NationText.tr("nationwars.peace.summary.white") : NationText.join(parts);
     }
@@ -556,6 +597,7 @@ extends AbstractContainerMenu {
         copy.demandedMoney = NationStore.roundMoney(source.demandedMoney);
         copy.offeredMoney = NationStore.roundMoney(source.offeredMoney);
         copy.returnCapturedClaims = source.returnCapturedClaims;
+        copy.puppetReceiver = source.puppetReceiver;
         return copy;
     }
 
@@ -567,7 +609,8 @@ extends AbstractContainerMenu {
             && expected.offeredClaims.equals(current.offeredClaims)
             && Double.compare(expected.demandedMoney, current.demandedMoney) == 0
             && Double.compare(expected.offeredMoney, current.offeredMoney) == 0
-            && expected.returnCapturedClaims == current.returnCapturedClaims;
+            && expected.returnCapturedClaims == current.returnCapturedClaims
+            && expected.puppetReceiver == current.puppetReceiver;
     }
 
     private static ItemStack item(Item item, Component name, List<Component> lore) {
@@ -591,7 +634,8 @@ extends AbstractContainerMenu {
         DEMAND_PREV,
         DEMAND_NEXT,
         OFFER_PREV,
-        OFFER_NEXT;
+        OFFER_NEXT,
+        PUPPET_RECEIVER;
 
     }
 

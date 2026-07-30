@@ -22,6 +22,5 @@ public final class MarketCommand {
                     .executes(context -> NationCommands.sellHand(context, DoubleArgumentType.getDouble(context, "price")))))
             .then(Commands.literal("cancel")
                 .then(Commands.argument("id", IntegerArgumentType.integer(1)).executes(NationCommands::cancelListing))));
-        dispatcher.register(Commands.literal("nations").requires(source -> source.hasPermission(0)).executes(NationCommands::nations));
     }
 }

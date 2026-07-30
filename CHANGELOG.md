@@ -1,5 +1,91 @@
 # Changelog
 
+## 0.5.0
+
+### Added
+
+- Complete Polish localization, including commands, menus, doctrines,
+  espionage, diplomacy, war, peace, trade, and the puppet system.
+- Puppet relations can be created voluntarily with `/puppet propose`,
+  `/puppet accept`, and `/puppet reject`, or imposed on the peace-deal receiver
+  by selecting the new Puppet term.
+- `/puppet` reports the executing owner's master, independence points, lost
+  independence wars, frozen status, and direct puppets. A country may control
+  multiple direct puppets and each puppet has at most one master. Cycles are
+  rejected. If an existing master is puppeted, its current direct puppets are
+  released; it may acquire new direct puppets later if no cycle is created.
+- Puppets begin at 100 independence points. `/puppet agitate` adds 10 and the
+  master may use `/puppet pacify <country>` to remove 10; each action has its
+  own 600-second cooldown.
+- Accepted foreign trades and rejected master offers add one independence
+  point. A one-sided gift from the master to the puppet removes one. These
+  trade-derived effects share a 120-second per-puppet throttle; trades still
+  complete while the point effect is cooling down.
+- Puppets may claim at 50 or more points, may use `/puppet war` above 150, and
+  may use `/puppet liberate` or `/puppet automate` at 200. A master may use
+  `/puppet annex <country>` at 0 points or after three lost independence wars.
+  Reaching a threshold never performs an automatic release or annexation.
+- `/puppet release <country>` lets a master release a direct puppet. Release is
+  refused during that puppet's active independence war so the relation and war
+  cannot become inconsistent.
+- A puppet pays 20% of its generated national passive income to its master each
+  ten-minute income cycle, rounded to cents before recurring trade income is
+  diverted. `/configure Puppets false` suspends puppet commands, restrictions,
+  peace terms, and tax without deleting saved relations.
+- Independence wars restore all occupied claims when resolved. A puppet win
+  releases the puppet without money or land gains; a loss removes 50 points and
+  records one loss. Points are frozen during the war, and a fourth attempt is
+  unavailable after three losses. Third nations cannot join either side or
+  receive an alliance/guarantee defense call for an independence war.
+- `/configure deletenation <country>` is available as an audited
+  permission-level-4 administration command and accepts command IDs or full
+  country names.
+- `/nation info` now reports the capital chunk.
+
+### Changed
+
+- Passive income is now paid every ten minutes as the active capital/structure income
+  times the doctrine income multiplier, plus `$8 * max(0, members - 1)`. The
+  base capital contribution is $120; existing $6 upgrade increments remain.
+- Soviet Collectivity starts with no base capital income, while upgrade income
+  and the additional-member income still apply.
+- American city claims now contribute 0.2x current capital income. British
+  coast claims now contribute 0.1x current capital income.
+- Italy's building payout is now $2. Kingdom of the South (formerly Civil War)
+  adds 10 seconds only when Italy is recapturing a tracked core claim.
+- `/nation create` now accepts no arguments and uses the existing doctrine-menu
+  and chat-name flow.
+- `/configure` is the only configuration root. `Puppets` defaults to `true`.
+  The misspelled `Satelites` alias was removed; correctly spelled `Satellites`
+  remains.
+
+### Disabled
+
+- `/nations` is intentionally not registered in 0.5.0.
+- The old `/configurate` command spelling is no longer registered.
+
+### Fixed
+
+- With `ScorchedEarth=true`, OPAC claim protection is fully bypassed for enemy
+  war territory, including block and entity interaction. Peace-offer and
+  respawn locks remain explicit Nation Wars war rules.
+- `/nation info` now shows the exact current ten-minute income payout instead
+  of a mislabeled ten-times projection.
+- Nation deletion moved from the debug-gated `/nation delete` command to
+  `/configure deletenation <country>` and now performs an OPAC resynchronization
+  after cleanup.
+
+### Preserved and regression-checked
+
+- Italy's Push-over still lets a defender with more claims reject an Italian
+  declaration once.
+- Declining an alliance or guarantee defense call still costs $250; France pays
+  $750. France's offensive-war maintenance remains 1.5x.
+- Soviet market purchases remain 1.25x and Soviet defense still doubles with
+  fewer than two enemy players present.
+- Romania still gains a stacking +0.1 maintenance multiplier for each lost
+  tracked core claim.
+
 ## 0.4.0
 
 ### Added

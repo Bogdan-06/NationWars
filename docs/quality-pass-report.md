@@ -92,7 +92,7 @@ No working gameplay system or source file was removed.
 - Dedicated-server smoke test: reached `Done` on Minecraft 1.21.1 / NeoForge
   21.1.227 with OPAC 0.27.5; Nation Wars registered and activated its OPAC party
   system and migrated the development save from data version 0 to 1.
-- Built JAR contains all three language catalogs.
+- Built JAR contains all four language catalogs.
 - Corrective-pass built JAR: 331,815 bytes; SHA-256
   `109220CB3BDB7EF209B33A99D6A7F1E9FDF5B90C8EFF13F381D7A365166E88BD`.
 - Spanish-localization built JAR: 345,704 bytes; SHA-256

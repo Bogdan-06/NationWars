@@ -59,6 +59,7 @@ import dev.moth.nationwars.service.WarService;
 import dev.moth.nationwars.command.AllianceCommand;
 import dev.moth.nationwars.command.MarketCommand;
 import dev.moth.nationwars.command.NationCommand;
+import dev.moth.nationwars.command.PuppetCommand;
 import dev.moth.nationwars.command.WarCommand;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -130,6 +131,7 @@ public final class NationCommands {
         NationCommand.register(dispatcher);
         AllianceCommand.register(dispatcher);
         WarCommand.register(dispatcher);
+        PuppetCommand.register(dispatcher);
     }
 
     private static void removeRootCommand(CommandDispatcher<CommandSourceStack> dispatcher, String command) {
@@ -584,7 +586,7 @@ public final class NationCommands {
         player.sendSystemMessage(NationText.tr("nationwars.command.nation.info.cities", nation.cityClaims.size()));
         player.sendSystemMessage(NationText.tr("nationwars.command.nation.info.treasury", NationStore.roundMoney(nation.balance)));
         player.sendSystemMessage(NationText.tr("nationwars.command.nation.info.maintenance", NationEvents.maintenanceDuePerInterval(store, nation)));
-        player.sendSystemMessage(NationText.tr("nationwars.command.nation.info.income", NationEvents.passiveIncomePerTenMinutes(store, nation)));
+        player.sendSystemMessage(NationText.tr("nationwars.command.nation.info.income", NationEvents.currentIncomePerCycle(store, nation)));
         store.allianceOf(nation).ifPresent(alliance -> player.sendSystemMessage(NationText.tr("nationwars.command.nation.info.alliance", alliance.name)));
         String guarantors = store.guarantorsOf(nation).stream().map(guarantor -> guarantor.name).collect(Collectors.joining(", "));
         player.sendSystemMessage(NationText.tr(guarantors.isBlank()
@@ -605,6 +607,10 @@ public final class NationCommands {
             return 0;
         }
         if (!NationCommands.requireNationOwner(player, store, nation.get())) {
+            return 0;
+        }
+        if (!store.canPuppetClaim(nation.get())) {
+            NationCommands.fail(player, "nationwars.command.claim.puppet_points_low");
             return 0;
         }
         ClaimKey claim = NationCommands.currentClaim(player);
@@ -1344,6 +1350,8 @@ public final class NationCommands {
         war.defender = defender.get().id;
         war.active = false;
         war.pendingDefenderResponse = false;
+        war.independenceWar = false;
+        war.independencePuppet = "";
         war.attackerCapturedClaims.clear();
         war.capturedClaimsByNation.clear();
         war.originalClaimOwners.clear();
@@ -1391,6 +1399,8 @@ public final class NationCommands {
             created.defender = defender.get().id;
             created.active = false;
             created.pendingDefenderResponse = false;
+            created.independenceWar = false;
+            created.independencePuppet = "";
             created.attackerCapturedClaims.clear();
             created.capturedClaimsByNation.clear();
             created.originalClaimOwners.clear();
@@ -1847,6 +1857,26 @@ public final class NationCommands {
             NationCommands.fail(player, "nationwars.command.surrender.not_enemy");
             return 0;
         }
+        if (store.isIndependenceWar(war)) {
+            NationStore.Nation puppet = store.nationById(war.independencePuppet).orElse(null);
+            NationStore.Nation master = puppet == null ? null : store.masterOf(puppet).orElse(null);
+            if (puppet == null || master == null) {
+                NationCommands.fail(player, "nationwars.command.puppet.war.invalid");
+                return 0;
+            }
+            boolean puppetWon = own.get().id.equals(master.id);
+            NationStore.IndependenceResolution resolution = store.resolveIndependenceWar(war, puppetWon);
+            if (!resolution.resolved()) {
+                NationCommands.fail(player, "nationwars.command.puppet.war.invalid");
+                return 0;
+            }
+            String resultKey = puppetWon ? "nationwars.puppet.war.puppet_victory" : "nationwars.puppet.war.master_victory";
+            store.notifyNation(player.getServer(), puppet,
+                NationText.message(resultKey, puppet.name, master.name, resolution.points(), resolution.lostWars()));
+            store.notifyNation(player.getServer(), master,
+                NationText.message(resultKey, puppet.name, master.name, resolution.points(), resolution.lostWars()));
+            return 1;
+        }
         if (!store.isPrimaryWarParticipant(war, own.get())) {
             return NationCommands.surrenderJoinedNation(player, store, war, own.get(), other.get());
         }
@@ -2010,6 +2040,14 @@ public final class NationCommands {
     private static boolean canStartHostilities(ServerPlayer player, NationStore store, NationStore.Nation attacker, NationStore.Nation defender) {
         if (attacker == null || defender == null || attacker.id.equals(defender.id)) {
             NationCommands.fail(player, "nationwars.command.war.self");
+            return false;
+        }
+        if (NationWarsConfig.get().puppets && store.isPuppet(attacker)) {
+            NationCommands.fail(player, "nationwars.command.war.puppet_cannot_declare");
+            return false;
+        }
+        if (NationWarsConfig.get().puppets && (store.isMasterOf(attacker, defender) || store.isMasterOf(defender, attacker))) {
+            NationCommands.fail(player, "nationwars.command.war.master_puppet_forbidden");
             return false;
         }
         if (store.activeTruce(attacker, defender).isPresent()) {

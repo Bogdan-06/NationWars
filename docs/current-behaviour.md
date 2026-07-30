@@ -1,33 +1,40 @@
-# Nation Wars 0.4.0 current-behavior contract
+# Nation Wars 0.5.0 current-behavior contract
 
-This document records the behavior observed in the pre-maintenance 0.4.0
-source. It is the compatibility contract for the localization, reliability,
-and maintainability pass. Values and rules in this document must remain stable
-unless the requested work explicitly authorizes a change.
+This document started as the behavior contract for the pre-maintenance 0.4.0
+source. It now records that inherited behavior together with the changes
+explicitly authorized by `Checklist 9.txt` and `Puppets.txt` for 0.5.0. Rules
+not listed as a 0.5.0 change remain compatibility-locked.
 
 Baseline archive:
 `nationwars-0.4.0-pre-quality-pass_2026-07-12_161732.zip`  
 SHA-256: `0FED1D4066572E70889BAF4F978200701E49AA84F0E5C409BF0117E8C41C6931`
 
+Checklist 9 backup:
+`nationwars-0.4.0-pre-checklist9_2026-07-25_221548.zip`  
+SHA-256: `C9AB3BEA214329540908C0A33ECBA202189575A8E30C2AAC9DEA9C4709CD5A1F`
+
 ## Runtime and dependencies
 
-- Mod ID: `nationwars`; mod version: `0.4.0`.
-- Java 21, Minecraft 1.21.1, NeoForge 21.1.227.
+- Mod ID: `nationwars`; mod version: `0.5.0`.
+- Java 21 and Minecraft 1.21.1. The build target is NeoForge 21.1.227 and
+  metadata accepts compatible NeoForge `[21.1.227,)` releases for 1.21.1.
 - Open Parties and Claims (OPAC) 0.27.5 is a required runtime and compile
   dependency; metadata currently accepts 0.27.5 through versions below 0.28.
 - Pre-quality-pass metadata advertised Minecraft `[1.21.1,1.22)` and NeoForge
   `[21.1.227,)`; at baseline only Minecraft 1.21.1/NeoForge 21.1.227 had been
   smoke-tested in this project.
-- All gameplay code is common/dedicated-server compatible. There are no
-  language resources in the baseline; all fixed player text is literal English.
+- All gameplay code is common/dedicated-server compatible. The baseline lacked
+  language resources; 0.5.0 includes English, Romanian, Spanish, and Polish catalogs.
+  Players need the Nation Wars resources on their client for text to follow
+  their selected Minecraft language.
 
 ## Startup, ticking, and shutdown
 
 - On `ServerStartedEvent`, Nation Wars loads its JSON config, activates and
   synchronizes its OPAC party system, loads world data, migrates coast markers,
   refreshes tab-list names, and schedules income, maintenance, and OPAC retries.
-- Passive income first runs 1,200 server ticks after startup and then every
-  1,200 ticks (normally one minute).
+- Passive income first runs 12,000 server ticks after startup and then every
+  12,000 ticks (normally ten minutes).
 - Maintenance first runs 12,000 server ticks after startup and then every
   12,000 ticks (normally ten minutes).
 - Once per second, truces expire/warn, disabled defense calls are cleared, and
@@ -42,20 +49,20 @@ SHA-256: `0FED1D4066572E70889BAF4F978200701E49AA84F0E5C409BF0117E8C41C6931`
 All normal player roots require permission level 0. Subcommands that act for a
 nation generally also require the executing player to be that nation's owner.
 
-| Command | Baseline behavior |
+| Command | 0.5.0 behavior |
 | --- | --- |
 | `/money` | Shows the executing player's balance. |
 | `/market` | Opens the paged market. |
 | `/market sellhand [price]` | Lists the full held stack at the supplied price or appraised default. |
 | `/market cancel <id>` | Returns and removes the seller's own listing. |
-| `/nations` | Opens the paged nation browser. |
+| `/nations` | Intentionally not registered in 0.5.0. |
 | `/nation doctrines [list]` | Opens doctrine UI; `list` prints doctrine values and perks. |
-| `/nation create [name] [doctrine]` | GUI creation, chat-name flow, or direct creation. |
-| `/nation join <name>` | Baseline source requires an existing nation invitation and applies the former-member restriction. |
-| `/nation invite <player>` | Nation owner creates a non-expiring invitation for an online player. |
+| `/nation create` | Opens the doctrine menu and then uses the chat-name flow. Direct `<name> [doctrine]` arguments are not registered. |
+| `/nation join <name>` | Applies the target's join policy and former-member restriction; `INVITE_ONLY` requires a valid unexpired invitation. |
+| `/nation invite <player>` | Nation owner creates a 600-second invitation for an online player. |
 | `/nation leave` | Non-owner member may leave only when `LeaveNation=true`; former membership is recorded. |
 | `/nation kick <member>` | Owner removes a member by recorded name or UUID; former membership is recorded. |
-| `/nation info [name]` | Own nation is always visible; named lookup requires `Satellites=true`. |
+| `/nation info [name]` | Own nation is always visible; named lookup requires `Satellites=true`; output includes the capital chunk. |
 | `/nation claim` | Owner claims the current chunk subject to dimension, spawn, adjacency, cost, and OPAC checks. |
 | `/nation unclaim` | Owner unclaims a non-capital, non-occupied claim. |
 | `/nation city` | United States owner converts an owned non-occupied claim into a city by paying its current claim cost. |
@@ -79,17 +86,23 @@ nation generally also require the executing player to be that nation's owner.
 | `/peace reject <country>` | Rejects an incoming peace offer and applies the proposer cooldown. |
 | `/surrender <country>` | Applies primary or joined-nation surrender behavior. |
 | `/spy create/hire/set/mission/info/status` | Owner-only espionage agency operations unless disabled. |
-| `/configurate` and `/configure` | Permission level 2; reads/writes server settings. |
-| `/nwdev` and `/nationwarsdev` | Baseline permission level 2; set money/treasury/doctrine, finish spy missions, save, or sync OPAC. |
+| `/puppet` | Owner-only puppet status; shows master, points, losses, frozen state, and direct puppets when `Puppets=true`. |
+| `/puppet propose/accept/reject <country>` | Voluntary puppet proposal flow. |
+| `/puppet pacify <country>` and `/puppet agitate` | Remove/add 10 independence points with separate 600-second cooldowns. |
+| `/puppet liberate` and `/puppet automate` | Equivalent manual peaceful-independence commands requiring 200 points. |
+| `/puppet release/annex <country>` | Master manually releases or, at an allowed threshold, annexes a direct puppet. |
+| `/puppet war` | Starts an immediate independence war against the master when points exceed 150. |
+| `/configure` | Permission level 2; reads/writes server settings. `/configurate` is not registered. |
+| `/nwdev` and `/nationwarsdev` | Permission level 4 and technical debug gate; set money/treasury/doctrine, finish spy missions, save, or sync OPAC. |
+| `/configure deletenation <country>` | Permission level 4; audited destructive nation deletion with full-name/ID lookup and OPAC resynchronization. It is not debug-gated. |
 | `/openpac-parties` | Removed/replaced and execution-blocked, including namespaced aliases; directs players to `/alliance`. |
 
-Command syntax and ordinary command permissions are fixed by this contract.
-Only the requested development-command safety and optional join-policy stages
-may add commands or alter related permissions.
+Apart from the command additions/removals explicitly recorded above, ordinary
+command syntax and permissions remain inherited from 0.4.0.
 
 ## Configuration defaults
 
-The baseline file is `config/nationwars-server.json`; writes use a temporary
+The gameplay configuration file is `config/nationwars-server.json`; writes use a temporary
 file, an atomic replacement where available, and one `.bak` copy.
 
 | Setting | Default | Effect |
@@ -109,11 +122,12 @@ file, an atomic replacement where available, and one `.bak` copy.
 | `claimNether` / `claimEnd` | `false` | Claims in those dimensions are disabled. |
 | `colonialism` | `false` | Later claims in a dimension must touch national territory. |
 | `allowTrade` | `true` | Nation-to-nation trade is enabled. |
+| `puppets` / `Puppets` | `true` | Enables puppet commands, restrictions, peace terms, point effects, and income tax. Disabling it preserves saved relations. |
 | `spawnProtection` | `200` | Claims intersecting a 200-block radius around Overworld spawn are rejected. |
 | `disabledDoctrines` | empty | No doctrine is disabled. |
 
-`/configurate Satelites` is intentionally retained as a misspelled compatibility
-alias for `/configurate Satellites`.
+Only the correctly spelled `/configure Satellites` setting is registered. The
+old `/configurate` root and misspelled `Satelites` setting alias are disabled.
 
 ## Nation membership and identity
 
@@ -124,10 +138,9 @@ alias for `/configurate Satellites`.
   owner their normal $50 player balance if they have no balance entry.
 - Doctrine availability is evaluated at creation time against disabled IDs and
   configured doctrine limits.
-- The baseline currently requires `/nation invite` before `/nation join`.
-  Invitations do not expire. The quality pass extended this with persisted
-  `OPEN`/`INVITE_ONLY`/`CLOSED` policies; the corrective pass keeps the baseline
-  invite-only default while applying the new 600-second invitation expiry.
+- Persisted `OPEN`/`INVITE_ONLY`/`CLOSED` policies control joining. New and
+  legacy nations default to the baseline-compatible `INVITE_ONLY`; invitations
+  expire after 600 seconds. `OPEN` needs no invitation and `CLOSED` rejects joins.
 - Leaving and kicking never remove the nation owner and record former members.
   `RejoinNation=false` blocks those former members from the same nation.
 - Tab-list names are `[Nation] Player` in gold/white or `[No Nation] Player` in
@@ -138,19 +151,26 @@ alias for `/configurate Satellites`.
 - Money is rounded to two decimals after transactions.
 - A new player ledger entry starts at **$50**. A new nation treasury starts at
   **$250**.
-- Base capital income is **$12/minute**. Each nation upgrade adds **$6/minute**
+- Base capital income is **$120 per ten-minute cycle**. Each nation upgrade adds **$6 per cycle**
   and five free claims. Upgrade prices are **$1000, $1500, $2000, $2500**.
   There are at most four upgrades.
-- USA cannot purchase upgrades and always has $12/minute capital income.
-- Soviet capital base income is $0/minute, but its upgrades add $6/minute each.
-- A paralyzed capital or city/coast claim contributes no passive income.
-- British Ports add **25% of that nation's current capital income** for every
+- USA cannot purchase upgrades and has $120 per-cycle capital income.
+- Soviet capital base income is $0 per cycle, but its upgrades add $6 per cycle each.
+- Each member after the first adds **$8 per cycle** outside the doctrine income
+  multiplier. For example, an unupgraded four-member Soviet nation receives
+  `$0 + (4 - 1) * $8 = $24 per cycle`.
+- A paralyzed capital or individual city/coast claim contributes no income;
+  member income continues because it does not come from a claim.
+- British Ports add **10% of that nation's current capital income** for every
   owned coast claim, including a coastal capital.
-- Each USA city claim adds **$3/minute** and costs that claim's current claim
-  cost when created.
-- Doctrine `incomeMultiplier` is applied after capital, port, and city income
-  are summed.
-- Recurring trade payments are diverted from the payer's generated passive
+- Each USA city claim adds **20% of current capital income** and costs that
+  claim's current claim cost when created.
+- Per ten-minute cycle, the exact generated amount is
+  `round(((active current capital contribution + active ports/cities) * doctrine income multiplier)
+  + max(0, member count - 1) * $8)`. The member term is outside the doctrine
+  multiplier. "Current capital" already includes the base and purchased $6
+  upgrade increments, so upgrades are not counted twice.
+- Recurring trade values are denominated per ten-minute cycle and are diverted from the payer's generated passive
   income, never directly from treasury. If obligations exceed income, available
   income is divided proportionally and rounded; recipients receive only the
   amount actually diverted.
@@ -174,7 +194,7 @@ alias for `/configurate Satellites`.
   lapis/redstone $4, iron $3, copper/quartz $2, coal $1, other ores $2, and a
   mature crop $1, multiplied by doctrine income multiplier. Silk Touch ores pay
   $0.
-- Italy building rewards are $5 with a 20% chance, at most one attempt per
+- Italy building rewards are $2 with a 20% chance, at most one attempt per
   world block position and one attempt per player per second, only in owned
   non-occupied territory and excluding the configured common-block list.
 
@@ -215,8 +235,11 @@ USA buys at 0.8x; Soviet buys at 1.25x; default multipliers are 1.0.
   in an active war receives a 20-second attack/defense/action lock on respawn.
 - When a peace offer is pending between opposing participants, capture and
   hostile break/place/fluid/container/explosion actions are paused.
-- `ScorchedEarth=false` blocks destructive hostile actions during war;
-  `ScorchedEarth=true` allows them, subject to peace and respawn locks.
+- `ScorchedEarth=false` leaves OPAC protection active in hostile war claims.
+  `ScorchedEarth=true` grants temporary full OPAC bypasses for block breaking,
+  placing, fluids, all block interactions, entity interactions, entity attacks,
+  and player-caused explosions in enemy war territory. Peace-offer, enemy-bed,
+  and respawn locks remain explicit Nation Wars war rules.
 - Active RAID effects grant temporary protected-claim interaction access.
 
 ## Doctrine defaults and effects
@@ -228,7 +251,7 @@ USA buys at 0.8x; Soviet buys at 1.25x; default multipliers are 1.0.
 | USA | United States | Democratic | 1.0 | 1.0 | 1.0 | 4 | 50s | Pacifist; distance claim scaling; market buy 0.8x; city claims; no upgrades. |
 | FRA | France | Democratic | 1.0 | 1.0 | 1.0 | 4 | 50s | Defender adds 25s; five bonus $300 spies; 3x betrayal cost; offensive-war maintenance 1.5x. |
 | ENG | United Kingdom | Democratic | 1.0 | 1.0 | 1.0 | 6 | 50s | Ports; coastal defense is captured 10s faster; peace-offer fee 3x. |
-| ITA | Italy | Fascist | 1.0 | 1.0 | 1.0 | 4 | 50s | Owned-land Speed II at peace/Speed I at war; building payouts; hills add 15s defense; recapture adds 10s; larger defender can reject once. |
+| ITA | Italy | Fascist | 1.0 | 1.0 | 1.0 | 4 | 50s | Owned-land Speed II at peace/Speed I at war; $2 building payouts; hills add 15s defense; tracked core recapture adds 10s; larger defender can reject once. |
 | ROM | Romania | Non-aligned | 1.0 | 1.0 | 1.0 | 4 | 50s | Safe war leave once per enemy ideology with 30m cooldown; enemies justify 30s longer; lost-core maintenance; Carol II drain. |
 
 Doctrine JSON datapacks may override these existing fields under
@@ -272,8 +295,9 @@ are restored before each reload.
 - Capture base uses the **attacker doctrine's capture seconds** times the
   defender's defense multiplier. Then: France defender +25s; British coast
   defender -10s; Italian hill/mountain defender +15s; Italian attacker
-  recapturing tracked land +10s; Soviet defender doubles the result with fewer
-  than two attackers. Final capture time is rounded with a 10-second minimum.
+  recapturing a claim in its war-start core snapshot +10s; Soviet defender
+  doubles the result with fewer than two attackers. Final capture time is
+  rounded with a 10-second minimum.
 - A defending member in the claim pauses capture. A pending peace offer also
   pauses capture without resetting accumulated seconds.
 - Capturing a capital capitulates the defender and targets 25% (rounded up,
@@ -306,6 +330,10 @@ are restored before each reload.
 - Acceptance revalidates exact pending terms, nation/war identity, ownership,
   capitals, treasuries, infiltration blocks, and other-war occupation before an
   atomic state save and OPAC claim synchronization.
+- When `Puppets=true`, a normal peace offer may include a Puppet term. The
+  proposer becomes master of the receiver when the offer is accepted. The term
+  is unavailable if the relation would be invalid and is not shown for an
+  independence war.
 - White peace is an empty deal. A primary pair ends the war; peace involving
   joined participants removes only eligible joined nations after applying
   selected terms.
@@ -315,14 +343,80 @@ are restored before each reload.
 - The six-row trade UI has 16 paged request claim slots, 16 offer claim slots,
   $100 treasury controls, recurring-income controls, accept/send, reject/clear,
   and close controls. Incoming offers are read-only.
-- Left/right click changes a recurring term by $1/min; shift-click changes it by
-  $10/min. Accepted recurring terms replace the existing bilateral agreement;
-  explicit $0/$0 ends it.
+- Left/right click changes a recurring term by $1 per ten-minute cycle;
+  shift-click changes it by $10 per cycle. Accepted recurring terms replace the
+  existing bilateral agreement; explicit $0/$0 ends it.
 - Capital and active-war-occupied claims are not tradable. Sending and
   accepting revalidate identities, ownership, war state, treasuries, and
   infiltration blocks. Exact snapshots prevent stale menu acceptance.
 - A single pending bilateral offer is stored; a new offer from either direction
   replaces the old one.
+
+## Puppet relations and independence
+
+- Puppet gameplay is enabled by default. `/configure Puppets false` suspends
+  puppet commands, normal-war/claim restrictions, new peace terms, trade point
+  effects, and income tax without deleting persisted relations. An already
+  active independence war remains resolvable.
+- Each puppet has at most one master, while a nation may have multiple direct
+  puppets. A nation that is already a puppet may later acquire direct puppets
+  of its own provided it does not create a cycle. Duplicate ownership and
+  cycles are rejected. When a country with existing puppets is itself puppeted,
+  annexed, or deleted, those current direct puppets are released.
+- Voluntary proposals require both nations to be out of active wars. The target
+  owner explicitly accepts or rejects with `/puppet accept <country>` or
+  `/puppet reject <country>`; proposals are persisted until handled or made
+  invalid by a relationship/nation change.
+- A new relation starts at **100 independence points**, clamped to **0-200**.
+  Threshold behavior is:
+
+| Points/state | Claim | Independence war | Peaceful liberation | Master annexation |
+| --- | --- | --- | --- | --- |
+| 0 | No | No | No | Yes |
+| 1-49 | No | No | No | No |
+| 50-150 | Yes | No | No | No |
+| 151-199 | Yes | Yes | No | No |
+| 200 | Yes | Yes | Yes | No |
+| Three lost independence wars | According to points | No fourth attempt | According to points | Yes, regardless of points |
+
+- Reaching 0 or 200 never changes the relationship automatically. The master
+  must use `/puppet annex <country>` at an annexation threshold; the puppet must
+  use `/puppet liberate` or its compatibility alias `/puppet automate` at 200.
+  The master may voluntarily use `/puppet release <country>` at other point
+  values, but release is refused while that relation is frozen by an active
+  independence war.
+- `/puppet agitate` adds 10 points and `/puppet pacify <country>` removes 10.
+  Each relation stores separate agitate and pacify cooldowns of **600 seconds**.
+- An accepted trade with a nation other than the master adds one point. Rejecting
+  an incoming offer from the master adds one point. A one-sided master gift in
+  which the puppet receives positive money, claims, or recurring income and
+  gives none of those asset categories removes one point. These point effects
+  share one **120-second** per-puppet trade throttle; the trade/rejection itself
+  still completes while the throttle is active.
+- A puppet pays **20%** of its generated passive national income to its master
+  each ten-minute income cycle. The tax is rounded to cents, subtracted before
+  the puppet's recurring-income obligations are distributed, and credited to
+  the master. The calculation includes active capital/structure income and the
+  member bonus. Tax received from a lower-level puppet is not part of the
+  receiver's own generated-income base and is therefore not taxed again.
+- A puppet cannot justify or declare a normal war, and a master and direct
+  puppet cannot declare normal war on each other. `/puppet war` is the sole
+  direct master-war exception and requires **more than 150 points**, fewer than
+  three prior independence-war losses, and neither nation already being at war.
+  Third countries cannot submit/accept join requests or alliance/guarantee
+  defense calls for an independence war.
+- During an independence war, point-changing actions are frozen. If the puppet
+  wins because its peace offer is accepted by the master, the master surrenders,
+  or the master's capital/last claim falls, the relation ends. If the puppet
+  accepts the master's peace offer, surrenders, or loses its capital/last claim,
+  it loses **50 points** and gains one recorded loss.
+- Independence-war resolution restores every captured claim to its original
+  owner. Normal peace, surrender, capitulation, money, and land-transfer terms
+  are not applied, so victory only changes independence status.
+- Annexation transfers all puppet claims, the non-negative puppet treasury, and
+  all puppet members to the master, synchronizes claim ownership through OPAC,
+  releases any dependents of the puppet, and removes the puppet nation. It does
+  not transfer a separate player's personal money ledger.
 
 ## Espionage
 
@@ -369,16 +463,21 @@ refresh costs $100 for every currently known field.
   confirmation slots must not move.
 - Trade and peace use their existing left/right claim columns, page controls,
   bottom-row money/action controls, and read-only incoming-offer flow.
+- Normal peace deals use the previously unused bottom-row slot 50 for the Puppet
+  term. Incoming offers display it read-only; independence-war offers omit it.
 - Shift-click does not move inventory items in Nation Wars display menus.
 
 ## Persistence contract
 
-- World data is JSON at `world/data/nationwars.json`. Baseline state has no
-  `dataVersion`; this is version 0 for migration purposes.
+- World data is JSON at `world/data/nationwars.json`. Baseline state with no
+  `dataVersion` is version 0; 0.4.0 quality-pass saves are version 1; 0.5.0
+  writes version 2.
 - The state stores nations, memberships/names/player balances, former members,
   invitations, claims/coasts, wars and capture provenance, alliances, truces,
   recurring income, guarantees, peace cooldowns, spy state/effects/intel,
-  market and trade offers, Italian rewarded positions, and next IDs.
+  market and trade offers, Italian rewarded positions, puppet relations and
+  proposals, independence points/losses/cooldowns, independence-war markers,
+  and next IDs.
 - Every existing mutating operation saves immediately at its current call site.
   This pass must preserve that timing while routing it through a coordinator.
 - Save writes `nationwars.json.tmp`, copies the prior main file to one `.bak`,
@@ -391,8 +490,10 @@ refresh costs $100 for every currently known field.
   deadlines to wall-clock-derived persistent ticks, and reconciles spies,
   wars, truces, and recurring payments. The normalized state is saved
   immediately after load.
-- Stage 4 may add `dataVersion=1`, an identity migration, a pre-migration
-  backup, and `SaveCoordinator`, but may not change save timing or identifiers.
+- Version 0 receives the identity-preserving 0-to-1 migration; version 1 then
+  receives the 1-to-2 puppet-schema migration. Existing values and unknown
+  retained fields are preserved, a pre-migration backup is created by the
+  established migration flow, and save timing/identifiers do not change.
 
 ## OPAC integration contract
 
@@ -411,16 +512,18 @@ refresh costs $100 for every currently known field.
 
 ## Finding classification
 
-### Confirmed implementation/reliability bugs or safety defects
+### Confirmed baseline defects corrected
 
-1. Destructive development commands are always registered at permission level
-   2 and have no production gate or audit log. Stage 5 explicitly authorizes
-   correcting this safety defect.
-2. OPAC TOML edits use direct regular-expression replacement without a backup,
-   validation, or rollback. Stage 7 explicitly requires a safe replacement.
-3. World data has no explicit schema version, so normalization and an immediate
-   save cannot distinguish an intentional migration from ordinary repair.
-   Stage 4 explicitly requires versioned migration and pre-migration backup.
+1. Destructive development commands were registered at permission level 2 with
+   no production gate or audit log. The 0.4.0 safety pass corrected this.
+2. OPAC TOML edits used direct regular-expression replacement without backup,
+   validation, or rollback. The 0.4.0 safety pass added guarded synchronization.
+3. World data had no explicit schema version. The 0.4.0 pass introduced version
+   1/migration backups; 0.5.0 advances through the explicit version-2 migration.
+4. The Italian recapture caller treated any occupied claim as a core. 0.5.0
+   now requires membership in Italy's war-start core snapshot.
+5. Review found that releasing a puppet during its independence war could leave
+   a relation-dependent war unresolved. The command now refuses that state.
 
 ### Questionable design or compatibility risks preserved for now
 
@@ -446,16 +549,17 @@ refresh costs $100 for every currently known field.
 
 ### Intentional gameplay behavior
 
-All numeric formulas, doctrine effects, command syntax, menu navigation,
-immediate save timing, war/claim/alliance/peace behavior, and OPAC behavior
-described above are intentional for this pass and must remain unchanged except
-for the expressly allowed debug-command and join-policy changes.
+All behavior described above is intentional for 0.5.0. Only Checklist 9 and
+the puppet specification authorize changes from the inherited 0.4.0 contract;
+unlisted economy values, doctrine effects, ordinary command permissions, menu
+navigation, immediate save timing, and OPAC behavior remain unchanged.
 
-## Authorized 0.4.0 maintenance addendum
+## Inherited 0.4.0 maintenance addendum
 
-- Save documents now carry `dataVersion: 1`. Missing versions are treated as
+- The 0.4.0 pass introduced `dataVersion: 1`. Missing versions are treated as
   version 0 and receive an identity migration after a dedicated pre-migration
-  backup. Immediate save calls and the `.tmp`/`.bak` replacement flow remain.
+  backup. Immediate save calls and the `.tmp`/`.bak` replacement flow remain;
+  0.5.0 then applies its version-2 migration.
 - Existing nations without a saved policy migrate to `INVITE_ONLY`. New nations
   use the NeoForge technical configuration default, which is also
   `INVITE_ONLY`. Explicitly saved `OPEN`, `INVITE_ONLY`, and `CLOSED` values are
@@ -468,3 +572,31 @@ for the expressly allowed debug-command and join-policy changes.
   player command permissions are unchanged.
 - Technical settings live in NeoForge's `nationwars-technical.toml`; gameplay
   and balance settings remain in the existing Nation Wars server JSON.
+
+## Authorized 0.5.0 addendum
+
+- Release metadata is 0.5.0 and save data advances to version 2 solely to
+  persist puppet relations, proposals, point cooldowns/losses, and
+  independence-war identity.
+- Passive income uses the $120 active capital baseline and $8 per additional
+  member formula documented above. FIX 0.5 changes the payout cadence to ten
+  minutes while retaining those per-cycle values and the existing distribution
+  order. Claim and maintenance formulas remain unchanged.
+- USA city income is 0.2x current capital income, British coast income is 0.1x,
+  and the Italian building payout is $2. The Italian recapture penalty now
+  applies only to war-start core claims and its name is Kingdom of the South.
+- `/configurate`, its `Satelites` typo, `/nations`, and direct arguments to
+  `/nation create` are removed from registration. Correct `/configure`,
+  `Satellites`, and the nation-creation menu/chat flow remain.
+- `/configure deletenation <country>` is deliberately destructive,
+  permission-level-4, audited, and responsible for relationship/claim cleanup
+  plus OPAC resynchronization. It is intentionally separate from debug commands.
+- The puppet system and all conservative interpretations are fixed by
+  `docs/checklist-9-plan.md` and the Puppet relations section of this contract.
+  In particular, thresholds unlock manual commands, trade effects use a
+  120-second throttle, agitate/pacify use 600-second cooldowns, independence
+  wars restore land, and a mid-war release is refused.
+- The following requested doctrine/rule items were already present and remain
+  behavior-locked: Italian Push-over; $250 betrayal and France's $750 variant;
+  French 1.5x offensive-war maintenance; Soviet 1.25x market price and doubled
+  sub-two-attacker defense; Romanian stacking +0.1 lost-core maintenance.

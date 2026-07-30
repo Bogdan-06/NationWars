@@ -24,7 +24,7 @@ public final class DevCommands {
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> command(String name) {
-        return Commands.literal(name).requires(source -> TechnicalConfig.debugCommandsEnabled() && source.hasPermission(4))
+        return Commands.literal(name).requires(source -> source.hasPermission(4))
             .executes(DevCommands::help)
             .then(Commands.literal("money")
                 .then(Commands.argument("player", StringArgumentType.word())
@@ -42,6 +42,9 @@ public final class DevCommands {
 
     private static int help(CommandContext<CommandSourceStack> context) {
         context.getSource().sendSuccess(() -> NationText.tr("nationwars.command.dev.header"), false);
+        if (!TechnicalConfig.debugCommandsEnabled()) {
+            context.getSource().sendFailure(NationText.tr("nationwars.command.dev.error.disabled"));
+        }
         context.getSource().sendSuccess(() -> NationText.tr("nationwars.command.dev.usage.money"), false);
         context.getSource().sendSuccess(() -> NationText.tr("nationwars.command.dev.usage.treasury"), false);
         context.getSource().sendSuccess(() -> NationText.tr("nationwars.command.dev.usage.doctrine"), false);
@@ -50,6 +53,9 @@ public final class DevCommands {
     }
 
     private static int setMoney(CommandContext<CommandSourceStack> context) {
+        if (!enabled(context)) {
+            return 0;
+        }
         String name = StringArgumentType.getString(context, "player");
         ServerPlayer player = context.getSource().getServer().getPlayerList().getPlayerByName(name);
         if (player == null) {
@@ -65,6 +71,9 @@ public final class DevCommands {
     }
 
     private static int setTreasury(CommandContext<CommandSourceStack> context) {
+        if (!enabled(context)) {
+            return 0;
+        }
         NationStore store = NationStore.get();
         NationStore.Nation nation = store.nationByName(StringArgumentType.getString(context, "country")).orElse(null);
         if (nation == null) {
@@ -79,6 +88,9 @@ public final class DevCommands {
     }
 
     private static int setDoctrine(CommandContext<CommandSourceStack> context) {
+        if (!enabled(context)) {
+            return 0;
+        }
         NationStore store = NationStore.get();
         NationStore.Nation nation = store.nationByName(StringArgumentType.getString(context, "country")).orElse(null);
         Doctrine doctrine = Doctrine.byId(StringArgumentType.getString(context, "id")).orElse(null);
@@ -94,6 +106,9 @@ public final class DevCommands {
     }
 
     private static int finishSpies(CommandContext<CommandSourceStack> context) {
+        if (!enabled(context)) {
+            return 0;
+        }
         NationStore store = NationStore.get();
         long tick = NationStore.persistentNow();
         int count = 0;
@@ -112,15 +127,29 @@ public final class DevCommands {
     }
 
     private static int save(CommandContext<CommandSourceStack> context) {
+        if (!enabled(context)) {
+            return 0;
+        }
         NationStore.get().save();
         context.getSource().sendSuccess(() -> NationText.tr("nationwars.command.dev.data_saved"), true);
         return 1;
     }
 
     private static int syncOpac(CommandContext<CommandSourceStack> context) {
+        if (!enabled(context)) {
+            return 0;
+        }
         OpacClaimsBridge.syncAll(context.getSource().getServer(), NationStore.get());
         context.getSource().sendSuccess(() -> NationText.tr("nationwars.command.dev.opac_synced"), true);
         return 1;
+    }
+
+    private static boolean enabled(CommandContext<CommandSourceStack> context) {
+        if (TechnicalConfig.debugCommandsEnabled()) {
+            return true;
+        }
+        context.getSource().sendFailure(NationText.tr("nationwars.command.dev.error.disabled"));
+        return false;
     }
 
     private static void audit(CommandSourceStack source, String action, String target, Object value) {

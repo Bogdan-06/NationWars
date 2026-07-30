@@ -25,12 +25,18 @@ class GameplayFormulaTest {
     }
 
     @Test
-    void passiveIncomePreservesCapitalPortCityAndUpgradeRules() {
-        assertEquals(12.0, EconomyService.passiveIncomePerMinute(Doctrine.GERMAN, 0, true, 0, 0));
-        assertEquals(18.0, EconomyService.passiveIncomePerMinute(Doctrine.BRITISH, 0, true, 1, 1));
-        assertEquals(0.0, EconomyService.passiveIncomePerMinute(Doctrine.SOVIET, 0, true, 3, 0));
-        assertEquals(12.0, EconomyService.capitalIncomePerMinute(Doctrine.AMERICAN, 4));
-        assertEquals(36.0, EconomyService.capitalIncomePerMinute(Doctrine.GERMAN, 4));
+    void currentIncomeCycleUsesCapitalStructureAndAdditionalMemberRules() {
+        assertEquals(12000, NationEvents.INCOME_INTERVAL_TICKS);
+        assertEquals(120.0, EconomyService.currentIncomePerCycle(Doctrine.GERMAN, 0, true, 0, 0, 1));
+        assertEquals(144.0, EconomyService.currentIncomePerCycle(Doctrine.GERMAN, 0, true, 0, 0, 4));
+        assertEquals(24.0, EconomyService.currentIncomePerCycle(Doctrine.SOVIET, 0, true, 3, 0, 4));
+        assertEquals(48.0, EconomyService.currentIncomePerCycle(Doctrine.SOVIET, 4, true, 0, 0, 4));
+        assertEquals(24.0, EconomyService.currentIncomePerCycle(Doctrine.GERMAN, 0, false, 0, 0, 4));
+        assertEquals(132.0, EconomyService.currentIncomePerCycle(Doctrine.BRITISH, 0, true, 1, 0, 1));
+        assertEquals(144.0, EconomyService.currentIncomePerCycle(Doctrine.AMERICAN, 0, true, 0, 1, 1));
+        assertEquals(120.0, EconomyService.capitalIncomePerCycle(Doctrine.AMERICAN, 4));
+        assertEquals(144.0, EconomyService.capitalIncomePerCycle(Doctrine.GERMAN, 4));
+        assertEquals(24.0, EconomyService.capitalIncomePerCycle(Doctrine.SOVIET, 4));
     }
 
     @Test

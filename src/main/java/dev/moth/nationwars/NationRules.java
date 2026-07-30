@@ -1,7 +1,7 @@
 package dev.moth.nationwars;
 
 public final class NationRules {
-    private static final double BASE_CAPITAL_INCOME = 12.0;
+    private static final double BASE_CAPITAL_INCOME = 120.0;
 
     private NationRules() {
     }

@@ -18,7 +18,6 @@ public final class ConfigCommands {
     @SubscribeEvent
     public static void register(RegisterCommandsEvent event) {
         CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
-        dispatcher.register(root("configurate"));
         dispatcher.register(root("configure"));
     }
 
@@ -35,12 +34,15 @@ public final class ConfigCommands {
             .then(booleanSetting("Guarantees", "Guarantees", config -> config.guarantees, (config, enabled) -> config.guarantees = enabled))
             .then(booleanSetting("LeaveNation", "LeaveNation", config -> config.leaveNation, (config, enabled) -> config.leaveNation = enabled))
             .then(booleanSetting("RejoinNation", "RejoinNation", config -> config.rejoinNation, (config, enabled) -> config.rejoinNation = enabled))
-            .then(booleanSetting("Satelites", "Satellites", config -> config.satellites, (config, enabled) -> config.satellites = enabled))
             .then(booleanSetting("Satellites", "Satellites", config -> config.satellites, (config, enabled) -> config.satellites = enabled))
             .then(booleanSetting("ClaimNether", "ClaimNether", config -> config.claimNether, (config, enabled) -> config.claimNether = enabled))
             .then(booleanSetting("ClaimEnd", "ClaimEnd", config -> config.claimEnd, (config, enabled) -> config.claimEnd = enabled))
             .then(booleanSetting("Colonialism", "Colonialism", config -> config.colonialism, (config, enabled) -> config.colonialism = enabled))
             .then(booleanSetting("AllowTrade", "AllowTrade", config -> config.allowTrade, (config, enabled) -> config.allowTrade = enabled))
+            .then(booleanSetting("Puppets", "Puppets", config -> config.puppets, (config, enabled) -> config.puppets = enabled))
+            .then(Commands.literal("deletenation").requires(source -> source.hasPermission(4))
+                .then(Commands.argument("country", StringArgumentType.greedyString())
+                    .executes(ConfigCommands::deleteNation)))
             .then(Commands.literal("SpawnProtection")
                 .then(Commands.argument("blocks", IntegerArgumentType.integer(0))
                     .executes(context -> {
@@ -110,6 +112,39 @@ public final class ConfigCommands {
         return ok(context, "nationwars.command.config.doctrine_disabled", doctrine.id, disabled);
     }
 
+    private static int deleteNation(CommandContext<CommandSourceStack> context) {
+        NationStore store = NationStore.get();
+        String requested = StringArgumentType.getString(context, "country").trim();
+        NationStore.Nation nation = store.nationByName(requested).orElse(null);
+        if (nation == null) {
+            context.getSource().sendFailure(NationText.tr("nationwars.command.error.country_missing"));
+            return 0;
+        }
+
+        String id = nation.id;
+        String name = nation.name;
+        try {
+            store.notifyNation(context.getSource().getServer(), nation,
+                NationText.message("nationwars.command.config.nation_deleted_notice", name));
+            store.deleteNation(nation);
+            if (store.nationById(id).isPresent()) {
+                context.getSource().sendFailure(NationText.tr("nationwars.command.config.error.delete_failed", name));
+                return 0;
+            }
+            OpacClaimsBridge.syncAll(context.getSource().getServer(), store);
+            NationEvents.refreshAllTabListNames(context.getSource().getServer());
+        } catch (RuntimeException exception) {
+            NationWars.LOGGER.error("Failed to delete Nation Wars nation '{}' ({}) for executor '{}'",
+                name, id, context.getSource().getTextName(), exception);
+            context.getSource().sendFailure(NationText.tr("nationwars.command.config.error.delete_failed", name));
+            return 0;
+        }
+
+        NationWars.LOGGER.warn("Nation Wars admin command: executor='{}', action='delete nation', target='{}', id='{}'",
+            context.getSource().getTextName(), name, id);
+        return ok(context, "nationwars.command.config.nation_deleted", name);
+    }
+
     private static int show(CommandContext<CommandSourceStack> context) {
         NationWarsConfig config = NationWarsConfig.get();
         CommandSourceStack source = context.getSource();
@@ -128,6 +163,7 @@ public final class ConfigCommands {
         line(source, "ClaimEnd", config.claimEnd);
         line(source, "Colonialism", config.colonialism);
         line(source, "AllowTrade", config.allowTrade);
+        line(source, "Puppets", config.puppets);
         source.sendSuccess(() -> NationText.tr("nationwars.command.config.spawn_protection", config.spawnProtection), false);
         Component disabled = config.disabledDoctrines.isEmpty()
             ? NationText.tr("nationwars.common.none")

@@ -26,6 +26,8 @@ import java.io.IOException;
 import java.nio.file.Path;
 import dev.moth.nationwars.persistence.NationRepository;
 import dev.moth.nationwars.persistence.DataIntegrityService;
+import dev.moth.nationwars.service.PuppetRules;
+import dev.moth.nationwars.service.PuppetService;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -391,6 +393,7 @@ public final class NationStore {
         if (offer.incomeTermsSpecified) {
             this.setIncomeAgreement(proposer, receiver, offer.offeredIncomePerMinute, offer.requestedIncomePerMinute);
         }
+        this.recordAcceptedPuppetTrade(offer);
         this.state.tradeOffers.removeIf(existing -> existing.id == offer.id);
         this.save();
         this.syncClaimTransfers(transfers);
@@ -992,20 +995,43 @@ public final class NationStore {
         if (nation == null) {
             return;
         }
+        for (War war : new ArrayList<>(this.state.wars.values())) {
+            if (this.isIndependenceWar(war)
+                && (nation.id.equals(war.attacker) || nation.id.equals(war.defender))) {
+                this.returnAllCapturedClaimsToOriginalOwners(war);
+            }
+        }
+        List<Nation> releasedPuppets = PuppetService.releaseAll(this.state, nation.id).stream()
+            .map(this.state.nations::get).filter(Objects::nonNull).toList();
+        PuppetRelation ownPuppetRelation = this.state.puppetRelations.get(nation.id);
+        if (ownPuppetRelation != null) {
+            PuppetService.release(this.state, ownPuppetRelation.master, nation.id);
+        }
+        this.state.puppetProposals.entrySet().removeIf(entry -> {
+            PuppetProposal proposal = entry.getValue();
+            return proposal == null || nation.id.equals(proposal.master) || nation.id.equals(proposal.puppet);
+        });
         for (String claimId : new ArrayList<String>(this.claimsOf(nation))) {
             this.state.claims.remove(claimId);
             this.state.landPurchaseOffers.removeIf(offer -> claimId.equals(offer.claimId));
             this.state.coastClaims.remove(claimId);
+            this.state.paralyzedClaims.remove(claimId);
+            this.state.raidedClaims.remove(claimId);
+            this.state.disabledCounterspyClaims.remove(claimId);
             OpacClaimsBridge.unmirrorClaim(this.server, nation, ClaimKey.parse(claimId));
         }
         this.state.nations.remove(nation.id);
         this.state.playerNation.entrySet().removeIf(entry -> nation.id.equals(entry.getValue()));
         this.state.formerNationMembers.remove(nation.id);
         this.state.nationInvites.remove(nation.id);
+        this.state.nationInviteExpirations.remove(nation.id);
+        this.state.landPurchaseOffers.removeIf(offer -> nation.id.equals(offer.buyer) || nation.id.equals(offer.seller));
         this.state.tradeOffers.removeIf(offer -> nation.id.equals(offer.proposer) || nation.id.equals(offer.receiver));
         this.state.truces.entrySet().removeIf(entry -> nation.id.equals(entry.getValue().first) || nation.id.equals(entry.getValue().second));
         this.state.truceOffers.entrySet().removeIf(entry -> nation.id.equals(entry.getValue().proposer) || nation.id.equals(entry.getValue().receiver));
         this.state.incomeTransfers.entrySet().removeIf(entry -> nation.id.equals(entry.getValue().payer) || nation.id.equals(entry.getValue().receiver));
+        this.state.peaceCooldowns.keySet().removeIf(key -> key.startsWith(nation.id + "->") || key.endsWith("->" + nation.id));
+        this.state.warDeclarationRejections.removeIf(key -> key.startsWith(nation.id + "->") || key.endsWith("->" + nation.id));
         this.state.alliances.values().removeIf(alliance -> Objects.equals(alliance.leader, nation.id));
         this.state.guarantees.remove(nation.id);
         this.state.guarantees.values().forEach(guarantors -> guarantors.remove(nation.id));
@@ -1042,6 +1068,12 @@ public final class NationStore {
             war.defenseCalls.entrySet().removeIf(entry -> nation.id.equals(entry.getKey()) || nation.id.equals(entry.getValue().caller));
         }
         this.save();
+        if (this.server != null) {
+            for (Nation released : releasedPuppets) {
+                this.notifyNation(this.server, released,
+                    NationText.message("nationwars.puppet.released.master_deleted", nation.name));
+            }
+        }
     }
 
     public boolean removeBorderClaim(Nation nation) {
@@ -1114,6 +1146,15 @@ public final class NationStore {
             return false;
         }
         NationStore.normalizePeaceDeal(deal);
+        if (this.isIndependenceWar(war)) {
+            Nation master = this.masterOf(this.state.nations.get(war.independencePuppet)).orElse(null);
+            boolean puppetWon = master != null && war.independencePuppet.equals(proposer.id)
+                && master.id.equals(receiver.id);
+            return this.resolveIndependenceWar(war, puppetWon).resolved();
+        }
+        if (deal.puppetReceiver && (!NationWarsConfig.get().puppets || !this.canEstablishPuppet(proposer, receiver))) {
+            return false;
+        }
         double demandedMoney = NationStore.roundMoney(Math.max(0.0, deal.demandedMoney));
         double offeredMoney = NationStore.roundMoney(Math.max(0.0, deal.offeredMoney));
         if (receiver.balance + 1.0E-4 < demandedMoney || proposer.balance + 1.0E-4 < offeredMoney) {
@@ -1175,6 +1216,13 @@ public final class NationStore {
                 };
             this.returnCapturedClaimsToOriginalOwnersState(war, selector, transfers);
         }
+        PuppetService.EstablishResult puppetResult = null;
+        if (deal.puppetReceiver) {
+            puppetResult = PuppetService.establish(this.state, proposer.id, receiver.id);
+            if (!puppetResult.established()) {
+                return false;
+            }
+        }
         if (this.isPrimaryPeacePair(war, proposer, receiver)) {
             NationStore.deactivateWarState(war);
             this.state.wars.remove(war.id, war);
@@ -1189,6 +1237,15 @@ public final class NationStore {
         }
         this.save();
         this.syncClaimTransfers(transfers);
+        if (puppetResult != null) {
+            for (String releasedId : puppetResult.releasedPuppets()) {
+                Nation released = this.state.nations.get(releasedId);
+                if (released != null) {
+                    this.notifyNation(this.server, released,
+                        NationText.message("nationwars.puppet.released.master_subjugated", receiver.name));
+                }
+            }
+        }
         return true;
     }
 
@@ -1199,6 +1256,10 @@ public final class NationStore {
         Nation proposer = this.state.nations.get(deal.proposer);
         Nation receiver = this.state.nations.get(deal.receiver);
         if (proposer == null || receiver == null || !this.areOpposingWarSides(war, proposer, receiver)) {
+            return false;
+        }
+        if (deal.puppetReceiver && (this.isIndependenceWar(war) || !NationWarsConfig.get().puppets
+            || !this.canEstablishPuppet(proposer, receiver))) {
             return false;
         }
         PeaceDeal existing = war.peaceDeal;
@@ -1518,7 +1579,8 @@ public final class NationStore {
     }
 
     public boolean addWarJoinRequest(War war, Nation requester, Nation sponsor) {
-        if (war == null || requester == null || sponsor == null || !war.active || this.sideOf(war, requester) != 0 || this.sideOf(war, sponsor) == 0) {
+        if (war == null || requester == null || sponsor == null || !war.active || war.independenceWar
+            || this.sideOf(war, requester) != 0 || this.sideOf(war, sponsor) == 0) {
             return false;
         }
         NationStore.ensureWarState(war);
@@ -1533,7 +1595,7 @@ public final class NationStore {
     }
 
     public boolean acceptWarJoinRequest(War war, Nation requester, Nation acceptor) {
-        if (war == null || requester == null || acceptor == null || !war.active) {
+        if (war == null || requester == null || acceptor == null || !war.active || war.independenceWar) {
             return false;
         }
         String sponsorId = war.joinRequests.get(requester.id);
@@ -1569,7 +1631,8 @@ public final class NationStore {
 
     public boolean addWarDefenseCall(War war, Nation ally, Nation caller, String kind) {
         int callerSide = this.sideOf(war, caller);
-        if (war == null || ally == null || caller == null || !war.active || this.sideOf(war, ally) != 0 || callerSide == 0
+        if (war == null || ally == null || caller == null || !war.active || war.independenceWar
+            || this.sideOf(war, ally) != 0 || callerSide == 0
             || this.wouldJoinAgainstProtectedRelationship(war, ally, callerSide)
             || this.hasConflictingWarRelationship(war, ally)) {
             return false;
@@ -1586,7 +1649,7 @@ public final class NationStore {
     }
 
     public boolean acceptWarDefenseCall(War war, Nation ally, Nation caller) {
-        if (war == null || ally == null || caller == null || !war.active) {
+        if (war == null || ally == null || caller == null || !war.active || war.independenceWar) {
             return false;
         }
         NationStore.ensureWarState(war);
@@ -2014,6 +2077,343 @@ public final class NationStore {
         return copy;
     }
 
+    public Optional<PuppetRelation> puppetRelation(Nation puppet) {
+        return puppet == null ? Optional.empty() : PuppetService.relation(this.state, puppet.id);
+    }
+
+    public Optional<Nation> masterOf(Nation puppet) {
+        return this.puppetRelation(puppet).flatMap(relation -> this.nationById(relation.master));
+    }
+
+    public List<Nation> puppetsOf(Nation master) {
+        if (master == null) {
+            return List.of();
+        }
+        return PuppetService.puppets(this.state, master.id).stream()
+            .map(this.state.nations::get)
+            .filter(Objects::nonNull)
+            .sorted(Comparator.comparing(nation -> nation.name, String.CASE_INSENSITIVE_ORDER))
+            .toList();
+    }
+
+    public boolean isPuppet(Nation nation) {
+        return this.puppetRelation(nation).isPresent();
+    }
+
+    public boolean isMasterOf(Nation master, Nation puppet) {
+        return master != null && puppet != null
+            && this.puppetRelation(puppet).map(relation -> master.id.equals(relation.master)).orElse(false);
+    }
+
+    public boolean canEstablishPuppet(Nation master, Nation puppet) {
+        return NationWarsConfig.get().puppets && master != null && puppet != null
+            && PuppetService.canEstablish(this.state, master.id, puppet.id);
+    }
+
+    public boolean proposePuppet(Nation master, Nation puppet) {
+        if (!this.canEstablishPuppet(master, puppet)
+            || !this.activeWarsOf(master).isEmpty() || !this.activeWarsOf(puppet).isEmpty()) {
+            return false;
+        }
+        boolean added = PuppetService.addProposal(this.state, master.id, puppet.id, NationStore.persistentNow());
+        if (added) {
+            this.save();
+        }
+        return added;
+    }
+
+    public boolean hasPuppetProposal(Nation master, Nation puppet) {
+        return master != null && puppet != null && PuppetService.hasProposal(this.state, master.id, puppet.id);
+    }
+
+    public PuppetEstablishResult acceptPuppetProposal(Nation master, Nation puppet) {
+        if (!this.hasPuppetProposal(master, puppet) || !this.canEstablishPuppet(master, puppet)
+            || !this.activeWarsOf(master).isEmpty() || !this.activeWarsOf(puppet).isEmpty()) {
+            return PuppetEstablishResult.failed();
+        }
+        PuppetService.removeProposal(this.state, master.id, puppet.id);
+        return this.establishPuppet(master, puppet);
+    }
+
+    public boolean rejectPuppetProposal(Nation master, Nation puppet) {
+        if (master == null || puppet == null) {
+            return false;
+        }
+        boolean removed = PuppetService.removeProposal(this.state, master.id, puppet.id);
+        if (removed) {
+            this.save();
+        }
+        return removed;
+    }
+
+    public PuppetEstablishResult establishPuppet(Nation master, Nation puppet) {
+        if (!this.canEstablishPuppet(master, puppet)) {
+            return PuppetEstablishResult.failed();
+        }
+        PuppetService.EstablishResult result = PuppetService.establish(this.state, master.id, puppet.id);
+        if (!result.established()) {
+            return PuppetEstablishResult.failed();
+        }
+        List<Nation> released = result.releasedPuppets().stream()
+            .map(this.state.nations::get)
+            .filter(Objects::nonNull)
+            .toList();
+        this.save();
+        for (Nation releasedNation : released) {
+            this.notifyNation(this.server, releasedNation,
+                NationText.message("nationwars.puppet.released.master_subjugated", puppet.name));
+        }
+        return new PuppetEstablishResult(true, result.relation(), released);
+    }
+
+    public boolean releasePuppet(Nation master, Nation puppet) {
+        PuppetRelation relation = this.puppetRelation(puppet).orElse(null);
+        if (!NationWarsConfig.get().puppets || master == null || puppet == null || relation == null
+            || this.pointsFrozen(relation)
+            || !PuppetService.release(this.state, master.id, puppet.id)) {
+            return false;
+        }
+        this.save();
+        return true;
+    }
+
+    public PuppetActionResult peacefullyLiberatePuppet(Nation puppet) {
+        PuppetRelation relation = this.puppetRelation(puppet).orElse(null);
+        if (!NationWarsConfig.get().puppets || relation == null) {
+            return PuppetActionResult.failure(PuppetActionStatus.NOT_A_PUPPET, relation);
+        }
+        if (this.pointsFrozen(relation)) {
+            return PuppetActionResult.failure(PuppetActionStatus.FROZEN, relation);
+        }
+        if (!PuppetRules.canPeacefullyLiberate(relation.independencePoints)) {
+            return PuppetActionResult.failure(PuppetActionStatus.POINTS_TOO_LOW, relation);
+        }
+        PuppetService.release(this.state, relation.master, relation.puppet);
+        this.save();
+        return PuppetActionResult.success(relation);
+    }
+
+    public PuppetActionResult agitatePuppet(Nation puppet) {
+        PuppetRelation relation = this.puppetRelation(puppet).orElse(null);
+        if (!NationWarsConfig.get().puppets || relation == null) {
+            return PuppetActionResult.failure(PuppetActionStatus.NOT_A_PUPPET, relation);
+        }
+        if (this.pointsFrozen(relation)) {
+            return PuppetActionResult.failure(PuppetActionStatus.FROZEN, relation);
+        }
+        long now = NationStore.persistentNow();
+        if (!PuppetRules.cooldownReady(now, relation.agitateCooldownUntil)) {
+            return new PuppetActionResult(PuppetActionStatus.COOLDOWN, relation.independencePoints,
+                relation.lostIndependenceWars, relation.agitateCooldownUntil);
+        }
+        relation.independencePoints = PuppetRules.agitate(relation.independencePoints, false);
+        relation.agitateCooldownUntil = PuppetRules.agitatePacifyCooldownUntil(now);
+        this.save();
+        return PuppetActionResult.success(relation);
+    }
+
+    public PuppetActionResult pacifyPuppet(Nation master, Nation puppet) {
+        PuppetRelation relation = this.puppetRelation(puppet).orElse(null);
+        if (!NationWarsConfig.get().puppets || relation == null || master == null || !master.id.equals(relation.master)) {
+            return PuppetActionResult.failure(PuppetActionStatus.NOT_MASTER, relation);
+        }
+        if (this.pointsFrozen(relation)) {
+            return PuppetActionResult.failure(PuppetActionStatus.FROZEN, relation);
+        }
+        long now = NationStore.persistentNow();
+        if (!PuppetRules.cooldownReady(now, relation.pacifyCooldownUntil)) {
+            return new PuppetActionResult(PuppetActionStatus.COOLDOWN, relation.independencePoints,
+                relation.lostIndependenceWars, relation.pacifyCooldownUntil);
+        }
+        relation.independencePoints = PuppetRules.pacify(relation.independencePoints, false);
+        relation.pacifyCooldownUntil = PuppetRules.agitatePacifyCooldownUntil(now);
+        this.save();
+        return PuppetActionResult.success(relation);
+    }
+
+    public boolean canPuppetClaim(Nation nation) {
+        if (!NationWarsConfig.get().puppets) {
+            return true;
+        }
+        return this.puppetRelation(nation)
+            .map(relation -> PuppetRules.canClaim(relation.independencePoints))
+            .orElse(true);
+    }
+
+    public boolean pointsFrozen(PuppetRelation relation) {
+        if (relation == null) {
+            return false;
+        }
+        return this.state.wars.values().stream().anyMatch(war -> war.active && war.independenceWar
+            && relation.puppet.equals(war.independencePuppet));
+    }
+
+    public PuppetWarResult startIndependenceWar(Nation puppet) {
+        PuppetRelation relation = this.puppetRelation(puppet).orElse(null);
+        Nation master = relation == null ? null : this.state.nations.get(relation.master);
+        if (!NationWarsConfig.get().puppets || relation == null || master == null) {
+            return new PuppetWarResult(PuppetActionStatus.NOT_A_PUPPET, null);
+        }
+        if (relation.lostIndependenceWars >= PuppetRules.ANNEX_AFTER_LOST_WARS) {
+            return new PuppetWarResult(PuppetActionStatus.MAXIMUM_WARS_LOST, null);
+        }
+        if (!PuppetRules.canStartIndependenceWar(relation.independencePoints)) {
+            return new PuppetWarResult(PuppetActionStatus.POINTS_TOO_LOW, null);
+        }
+        if (!this.activeWarsOf(puppet).isEmpty() || !this.activeWarsOf(master).isEmpty()) {
+            return new PuppetWarResult(PuppetActionStatus.ACTIVE_WAR, null);
+        }
+        String key = NationStore.warKey(puppet, master);
+        War war = new War();
+        war.id = key;
+        war.attacker = puppet.id;
+        war.defender = master.id;
+        war.active = true;
+        war.justificationCompleteTick = NationStore.persistentNow();
+        war.defenderStartingClaims = this.claimsOf(master).size();
+        war.independenceWar = true;
+        war.independencePuppet = puppet.id;
+        NationStore.ensureWarSides(war);
+        NationStore.ensureWarState(war);
+        this.snapshotWarCores(war, puppet);
+        this.snapshotWarCores(war, master);
+        this.state.wars.put(key, war);
+        this.save();
+        return new PuppetWarResult(PuppetActionStatus.SUCCESS, war);
+    }
+
+    public boolean isIndependenceWar(War war) {
+        return war != null && war.active && war.independenceWar && war.independencePuppet != null
+            && !war.independencePuppet.isBlank();
+    }
+
+    public IndependenceResolution resolveIndependenceWar(War war, boolean puppetWon) {
+        if (!this.isCurrentActiveWar(war) || !this.isIndependenceWar(war)) {
+            return IndependenceResolution.failed();
+        }
+        Nation puppet = this.state.nations.get(war.independencePuppet);
+        PuppetRelation relation = puppet == null ? null : this.state.puppetRelations.get(puppet.id);
+        if (puppet == null || relation == null) {
+            return IndependenceResolution.failed();
+        }
+        int returnedClaims = this.returnAllCapturedClaimsToOriginalOwners(war);
+        if (puppetWon) {
+            PuppetService.release(this.state, relation.master, relation.puppet);
+        } else {
+            relation.independencePoints = PuppetRules.adjustPoints(relation.independencePoints, -50, false);
+            relation.lostIndependenceWars = Math.max(0, relation.lostIndependenceWars) + 1;
+        }
+        int points = relation.independencePoints;
+        int losses = relation.lostIndependenceWars;
+        NationStore.deactivateWarState(war);
+        this.state.wars.remove(war.id, war);
+        this.save();
+        return new IndependenceResolution(true, puppetWon, points, losses, returnedClaims);
+    }
+
+    public PuppetAnnexResult annexPuppet(Nation master, Nation puppet) {
+        PuppetRelation relation = this.puppetRelation(puppet).orElse(null);
+        if (!NationWarsConfig.get().puppets || master == null || puppet == null || relation == null
+            || !master.id.equals(relation.master)) {
+            return PuppetAnnexResult.failure(PuppetActionStatus.NOT_MASTER);
+        }
+        if (this.pointsFrozen(relation) || !this.activeWarsOf(puppet).isEmpty() || !this.activeWarsOf(master).isEmpty()) {
+            return PuppetAnnexResult.failure(PuppetActionStatus.ACTIVE_WAR);
+        }
+        if (!PuppetRules.canAnnex(relation.independencePoints, relation.lostIndependenceWars)) {
+            return PuppetAnnexResult.failure(PuppetActionStatus.NOT_ANNEXABLE);
+        }
+        List<Nation> released = PuppetService.releaseAll(this.state, puppet.id).stream()
+            .map(this.state.nations::get).filter(Objects::nonNull).toList();
+        ArrayList<ClaimTransfer> transfers = new ArrayList<>();
+        int transferredClaims = 0;
+        for (String claimId : new ArrayList<>(this.claimsOf(puppet))) {
+            ClaimTransfer transfer = this.transferClaimState(claimId, master);
+            if (transfer != null) {
+                transfers.add(transfer);
+                master.coreClaims.add(claimId);
+                transferredClaims++;
+            }
+        }
+        double treasury = NationStore.roundMoney(Math.max(0.0, puppet.balance));
+        master.balance = NationStore.roundMoney(master.balance + treasury);
+        int transferredMembers = 0;
+        for (String member : new ArrayList<>(puppet.members)) {
+            if (master.members.add(member)) {
+                transferredMembers++;
+            }
+            this.state.playerNation.put(member, master.id);
+        }
+        PuppetService.release(this.state, master.id, puppet.id);
+        this.deleteNation(puppet);
+        this.syncClaimTransfers(transfers);
+        OpacClaimsBridge.syncAll(this.server, this);
+        for (Nation releasedNation : released) {
+            this.notifyNation(this.server, releasedNation,
+                NationText.message("nationwars.puppet.released.master_annexed", puppet.name));
+        }
+        return new PuppetAnnexResult(PuppetActionStatus.SUCCESS, transferredClaims, transferredMembers, treasury, released);
+    }
+
+    public void recordAcceptedPuppetTrade(TradeOffer offer) {
+        if (!NationWarsConfig.get().puppets || offer == null) {
+            return;
+        }
+        Nation proposer = this.state.nations.get(offer.proposer);
+        Nation receiver = this.state.nations.get(offer.receiver);
+        if (proposer == null || receiver == null) {
+            return;
+        }
+        this.recordAcceptedPuppetTradeFor(proposer, receiver, false, offer);
+        this.recordAcceptedPuppetTradeFor(receiver, proposer, true, offer);
+    }
+
+    private void recordAcceptedPuppetTradeFor(Nation puppet, Nation other, boolean puppetIsReceiver,
+                                               TradeOffer offer) {
+        PuppetRelation relation = this.state.puppetRelations.get(puppet.id);
+        if (relation == null || this.pointsFrozen(relation)) {
+            return;
+        }
+        long now = NationStore.persistentNow();
+        if (!PuppetRules.cooldownReady(now, relation.tradePointCooldownUntil)) {
+            return;
+        }
+        int delta;
+        if (!other.id.equals(relation.master)) {
+            delta = PuppetRules.FOREIGN_TRADE_DELTA;
+        } else {
+            double receivedMoney = puppetIsReceiver ? offer.offeredMoney : offer.requestedMoney;
+            int receivedClaims = puppetIsReceiver ? offer.offeredClaims.size() : offer.requestedClaims.size();
+            double receivedIncome = puppetIsReceiver ? offer.offeredIncomePerMinute : offer.requestedIncomePerMinute;
+            double givenMoney = puppetIsReceiver ? offer.requestedMoney : offer.offeredMoney;
+            int givenClaims = puppetIsReceiver ? offer.requestedClaims.size() : offer.offeredClaims.size();
+            double givenIncome = puppetIsReceiver ? offer.requestedIncomePerMinute : offer.offeredIncomePerMinute;
+            if (!PuppetRules.isPuppetFavouredMasterTrade(receivedMoney, receivedClaims, receivedIncome,
+                givenMoney, givenClaims, givenIncome)) {
+                return;
+            }
+            delta = PuppetRules.MASTER_FAVOURED_TRADE_DELTA;
+        }
+        relation.independencePoints = PuppetRules.adjustPoints(relation.independencePoints, delta, false);
+        relation.tradePointCooldownUntil = PuppetRules.tradePointCooldownUntil(now);
+    }
+
+    public boolean recordRejectedMasterTrade(Nation puppet, Nation master) {
+        PuppetRelation relation = this.puppetRelation(puppet).orElse(null);
+        if (!NationWarsConfig.get().puppets || relation == null || master == null
+            || !master.id.equals(relation.master) || this.pointsFrozen(relation)) {
+            return false;
+        }
+        long now = NationStore.persistentNow();
+        if (!PuppetRules.cooldownReady(now, relation.tradePointCooldownUntil)) {
+            return false;
+        }
+        relation.independencePoints = PuppetRules.applyForeignTrade(relation.independencePoints, false);
+        relation.tradePointCooldownUntil = PuppetRules.tradePointCooldownUntil(now);
+        this.save();
+        return true;
+    }
+
     public Optional<SpyAgency> spyAgency(Nation nation) {
         return nation == null ? Optional.empty() : Optional.ofNullable(nation.spyAgency);
     }
@@ -2259,6 +2659,12 @@ public final class NationStore {
         if (this.state.peaceCooldowns == null) {
             this.state.peaceCooldowns = new LinkedHashMap<String, Long>();
         }
+        if (this.state.puppetRelations == null) {
+            this.state.puppetRelations = new LinkedHashMap<String, PuppetRelation>();
+        }
+        if (this.state.puppetProposals == null) {
+            this.state.puppetProposals = new LinkedHashMap<String, PuppetProposal>();
+        }
         if (this.state.warDeclarationRejections == null) {
             this.state.warDeclarationRejections = new LinkedHashSet<String>();
         }
@@ -2284,6 +2690,19 @@ public final class NationStore {
         if (repairs.repairedReferences() > 0) {
             NationWars.LOGGER.warn("Repaired {} invalid Nation Wars save reference(s): {}",
                 repairs.repairedReferences(), String.join("; ", repairs.details()));
+        }
+        PuppetService.NormalizeResult puppetRepairs = PuppetService.normalize(this.state);
+        if (puppetRepairs.removedRelations() > 0 || puppetRepairs.removedProposals() > 0) {
+            NationWars.LOGGER.warn("Removed {} invalid puppet relation(s) and {} invalid puppet proposal(s).",
+                puppetRepairs.removedRelations(), puppetRepairs.removedProposals());
+        }
+        for (PuppetRelation relation : this.state.puppetRelations.values()) {
+            relation.agitateCooldownUntil = this.migrateDeadline(relation.agitateCooldownUntil,
+                PuppetRules.AGITATE_PACIFY_COOLDOWN_TICKS);
+            relation.pacifyCooldownUntil = this.migrateDeadline(relation.pacifyCooldownUntil,
+                PuppetRules.AGITATE_PACIFY_COOLDOWN_TICKS);
+            relation.tradePointCooldownUntil = this.migrateDeadline(relation.tradePointCooldownUntil,
+                PuppetRules.TRADE_POINT_COOLDOWN_TICKS);
         }
         this.state.nations.entrySet().removeIf(entry -> entry.getKey() == null || entry.getKey().isBlank() || entry.getValue() == null);
         this.state.playerNames.entrySet().removeIf(entry -> entry.getKey() == null || entry.getKey().isBlank() || entry.getValue() == null || entry.getValue().isBlank());
@@ -2342,6 +2761,24 @@ public final class NationStore {
         for (War war : this.state.wars.values().stream().sorted(Comparator.comparing(value -> value.id)).toList()) {
             NationStore.ensureWarSides(war);
             NationStore.ensureWarState(war);
+            if (war.independenceWar) {
+                PuppetRelation relation = this.state.puppetRelations.get(war.independencePuppet);
+                boolean validIndependenceWar = relation != null
+                    && war.independencePuppet.equals(war.attacker)
+                    && relation.master.equals(war.defender);
+                if (!validIndependenceWar) {
+                    NationWars.LOGGER.warn("Cleared an invalid independence-war marker from war {}.", war.id);
+                    war.independenceWar = false;
+                    war.independencePuppet = "";
+                } else {
+                    war.attackerSide.clear();
+                    war.attackerSide.add(war.attacker);
+                    war.defenderSide.clear();
+                    war.defenderSide.add(war.defender);
+                    war.joinRequests.clear();
+                    war.defenseCalls.clear();
+                }
+            }
             war.attackerSide.removeIf(id -> !this.state.nations.containsKey(id));
             war.defenderSide.removeIf(id -> !this.state.nations.containsKey(id) || war.attackerSide.contains(id));
             war.joinRequests.entrySet().removeIf(entry -> !this.state.nations.containsKey(entry.getKey())
@@ -2732,6 +3169,12 @@ public final class NationStore {
         }
         war.coreClaimsByNation.replaceAll((id, claims) -> claims == null ? new LinkedHashSet<>() : claims);
         war.coreClaimsByNation.values().forEach(claims -> claims.removeIf(claimId -> !isValidClaimId(claimId)));
+        if (war.independencePuppet == null) {
+            war.independencePuppet = "";
+        }
+        if (!war.independenceWar) {
+            war.independencePuppet = "";
+        }
     }
 
     private static void deactivateWarState(War war) {
@@ -2745,6 +3188,8 @@ public final class NationStore {
         war.peaceOffers.clear();
         war.joinRequests.clear();
         war.defenseCalls.clear();
+        war.independenceWar = false;
+        war.independencePuppet = "";
     }
 
     private static void ensureWarSides(War war) {
@@ -2862,6 +3307,74 @@ public final class NationStore {
         }
     }
 
+    public enum PuppetActionStatus {
+        SUCCESS,
+        NOT_A_PUPPET,
+        NOT_MASTER,
+        FROZEN,
+        COOLDOWN,
+        POINTS_TOO_LOW,
+        MAXIMUM_WARS_LOST,
+        ACTIVE_WAR,
+        NOT_ANNEXABLE
+    }
+
+    public record PuppetActionResult(PuppetActionStatus status, int points, int lostWars, long cooldownUntil) {
+        public static PuppetActionResult success(PuppetRelation relation) {
+            return new PuppetActionResult(PuppetActionStatus.SUCCESS,
+                relation == null ? 0 : relation.independencePoints,
+                relation == null ? 0 : relation.lostIndependenceWars, 0L);
+        }
+
+        public static PuppetActionResult failure(PuppetActionStatus status, PuppetRelation relation) {
+            return new PuppetActionResult(status,
+                relation == null ? 0 : relation.independencePoints,
+                relation == null ? 0 : relation.lostIndependenceWars, 0L);
+        }
+
+        public boolean successful() {
+            return this.status == PuppetActionStatus.SUCCESS;
+        }
+    }
+
+    public record PuppetEstablishResult(boolean established, PuppetRelation relation, List<Nation> releasedPuppets) {
+        public PuppetEstablishResult {
+            releasedPuppets = List.copyOf(releasedPuppets);
+        }
+
+        public static PuppetEstablishResult failed() {
+            return new PuppetEstablishResult(false, null, List.of());
+        }
+    }
+
+    public record PuppetWarResult(PuppetActionStatus status, War war) {
+        public boolean started() {
+            return this.status == PuppetActionStatus.SUCCESS && this.war != null;
+        }
+    }
+
+    public record IndependenceResolution(boolean resolved, boolean puppetWon, int points, int lostWars,
+                                         int returnedClaims) {
+        public static IndependenceResolution failed() {
+            return new IndependenceResolution(false, false, 0, 0, 0);
+        }
+    }
+
+    public record PuppetAnnexResult(PuppetActionStatus status, int transferredClaims, int transferredMembers,
+                                    double transferredTreasury, List<Nation> releasedPuppets) {
+        public PuppetAnnexResult {
+            releasedPuppets = List.copyOf(releasedPuppets);
+        }
+
+        public static PuppetAnnexResult failure(PuppetActionStatus status) {
+            return new PuppetAnnexResult(status, 0, 0, 0.0, List.of());
+        }
+
+        public boolean annexed() {
+            return this.status == PuppetActionStatus.SUCCESS;
+        }
+    }
+
     public static final class State {
         public int dataVersion = 0;
         public Map<String, Nation> nations = new LinkedHashMap<String, Nation>();
@@ -2881,6 +3394,8 @@ public final class NationStore {
         public Map<String, IncomeTransfer> incomeTransfers = new LinkedHashMap<String, IncomeTransfer>();
         public Map<String, Long> spyCooldowns = new LinkedHashMap<String, Long>();
         public Map<String, Long> peaceCooldowns = new LinkedHashMap<String, Long>();
+        public Map<String, PuppetRelation> puppetRelations = new LinkedHashMap<String, PuppetRelation>();
+        public Map<String, PuppetProposal> puppetProposals = new LinkedHashMap<String, PuppetProposal>();
         public Map<String, Set<String>> guarantees = new LinkedHashMap<String, Set<String>>();
         public Map<String, Long> paralyzedClaims = new LinkedHashMap<String, Long>();
         public Map<String, Long> raidedClaims = new LinkedHashMap<String, Long>();
@@ -2989,6 +3504,8 @@ public final class NationStore {
         public Map<String, String> originalClaimOwners = new LinkedHashMap<String, String>();
         public Map<String, Set<String>> coreClaimsByNation = new LinkedHashMap<String, Set<String>>();
         public boolean pendingDefenderResponse = false;
+        public boolean independenceWar = false;
+        public String independencePuppet = "";
     }
 
     public static final class DefenseCall {
@@ -3004,6 +3521,23 @@ public final class NationStore {
         public double demandedMoney = 0.0;
         public double offeredMoney = 0.0;
         public boolean returnCapturedClaims = false;
+        public boolean puppetReceiver = false;
+    }
+
+    public static final class PuppetRelation {
+        public String master = "";
+        public String puppet = "";
+        public int independencePoints = PuppetRules.INITIAL_INDEPENDENCE_POINTS;
+        public int lostIndependenceWars = 0;
+        public long agitateCooldownUntil = 0L;
+        public long pacifyCooldownUntil = 0L;
+        public long tradePointCooldownUntil = 0L;
+    }
+
+    public static final class PuppetProposal {
+        public String master = "";
+        public String puppet = "";
+        public long createdTick = 0L;
     }
 
     public static final class TradeOffer {

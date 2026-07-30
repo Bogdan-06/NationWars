@@ -412,9 +412,15 @@ public final class NationTradeMenu extends AbstractContainerMenu {
             player.closeContainer();
             return;
         }
+        boolean independenceIncreased = store.recordRejectedMasterTrade(this.ownNation, this.otherNation);
         store.removeTradeOffer(pending);
         store.notifyNation(player.getServer(), this.otherNation, NationText.message("nationwars.trade.rejected_by", this.ownNation.name));
         store.notifyNation(player.getServer(), this.ownNation, NationText.message("nationwars.trade.rejected"));
+        if (independenceIncreased) {
+            int points = store.puppetRelation(this.ownNation).map(relation -> relation.independencePoints).orElse(0);
+            store.notifyNation(player.getServer(), this.ownNation,
+                NationText.message("nationwars.puppet.points.master_trade_rejected", points));
+        }
         player.closeContainer();
     }
 

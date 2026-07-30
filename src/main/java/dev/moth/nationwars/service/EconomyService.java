@@ -8,7 +8,9 @@ public final class EconomyService {
     public static final double BASE_CLAIM_COST = 100.0;
     public static final double MAINTENANCE_PER_CLAIM = 8.0;
     public static final double CAPTURED_CLAIM_MAINTENANCE_MULTIPLIER = 2.0;
-    public static final double CITY_INCOME_PER_MINUTE = 3.0;
+    public static final double AMERICAN_CITY_INCOME_MULTIPLIER = 0.2;
+    public static final double BRITISH_PORT_INCOME_MULTIPLIER = 0.1;
+    public static final double ADDITIONAL_MEMBER_INCOME_PER_CYCLE = 8.0;
 
     private EconomyService() {
     }
@@ -19,19 +21,22 @@ public final class EconomyService {
         return roundMoney(BASE_CLAIM_COST * expansion * distance * doctrine.claimCostMultiplier);
     }
 
-    public static double capitalIncomePerMinute(Doctrine doctrine, int upgradeLevel) {
+    public static double capitalIncomePerCycle(Doctrine doctrine, int upgradeLevel) {
         return NationRules.capitalIncome(doctrine.id, upgradeLevel);
     }
 
-    public static double passiveIncomePerMinute(Doctrine doctrine, int upgradeLevel, boolean capitalActive,
-                                                 int activeCoastClaims, int activeCityClaims) {
-        double capitalIncome = capitalIncomePerMinute(doctrine, upgradeLevel);
+    public static double currentIncomePerCycle(Doctrine doctrine, int upgradeLevel, boolean capitalActive,
+                                                int activeCoastClaims, int activeCityClaims, int memberCount) {
+        double capitalIncome = capitalIncomePerCycle(doctrine, upgradeLevel);
         double income = capitalActive ? capitalIncome : 0.0;
         if (doctrine == Doctrine.BRITISH) {
-            income += Math.max(0, activeCoastClaims) * capitalIncome * 0.25;
+            income += Math.max(0, activeCoastClaims) * capitalIncome * BRITISH_PORT_INCOME_MULTIPLIER;
         }
-        income += Math.max(0, activeCityClaims) * CITY_INCOME_PER_MINUTE;
-        return roundMoney(income * doctrine.incomeMultiplier);
+        if (doctrine == Doctrine.AMERICAN) {
+            income += Math.max(0, activeCityClaims) * capitalIncome * AMERICAN_CITY_INCOME_MULTIPLIER;
+        }
+        double memberIncome = Math.max(0, memberCount - 1) * ADDITIONAL_MEMBER_INCOME_PER_CYCLE;
+        return roundMoney(income * doctrine.incomeMultiplier + memberIncome);
     }
 
     public static double maintenanceDue(int claims, int capturedClaims, Doctrine doctrine,

@@ -30,7 +30,7 @@ class NationRepositoryTest {
 
         assertTrue(result.migrated());
         assertEquals(0, result.originalVersion());
-        assertEquals(1, result.state().dataVersion);
+        assertEquals(2, result.state().dataVersion);
         assertEquals(123.45, result.state().players.get("00000000-0000-0000-0000-000000000001"));
         assertEquals(7, result.state().nextListingId);
         assertTrue(Files.exists(directory.resolve("nationwars.json.pre-migration-v0.bak")));
@@ -76,14 +76,33 @@ class NationRepositoryTest {
     }
 
     @Test
+    void versionOneMigratesToVersionTwoWithoutChangingExistingValues() throws Exception {
+        Path file = directory.resolve("nationwars.json");
+        Files.writeString(file, """
+            {"dataVersion":1,"nextTradeOfferId":27,"nations":{"alpha":{"id":"alpha","name":"Alpha","joinPolicy":"OPEN","balance":321.45}}}
+            """, StandardCharsets.UTF_8);
+
+        NationRepository.LoadResult result = new NationRepository(file).load();
+
+        assertTrue(result.migrated());
+        assertEquals(1, result.originalVersion());
+        assertEquals(2, result.state().dataVersion);
+        assertEquals(27, result.state().nextTradeOfferId);
+        assertEquals("Alpha", result.state().nations.get("alpha").name);
+        assertEquals(321.45, result.state().nations.get("alpha").balance);
+        assertEquals(JoinPolicy.OPEN, result.state().nations.get("alpha").joinPolicy());
+        assertTrue(Files.exists(directory.resolve("nationwars.json.pre-migration-v1.bak")));
+    }
+
+    @Test
     void loadsCurrentSaveVersionWithoutMigration() throws Exception {
         Path file = directory.resolve("nationwars.json");
-        Files.writeString(file, "{\"dataVersion\":1,\"nextTradeOfferId\":12}", StandardCharsets.UTF_8);
+        Files.writeString(file, "{\"dataVersion\":2,\"nextTradeOfferId\":12}", StandardCharsets.UTF_8);
 
         NationRepository.LoadResult result = new NationRepository(file).load();
 
         assertFalse(result.migrated());
-        assertEquals(1, result.state().dataVersion);
+        assertEquals(2, result.state().dataVersion);
         assertEquals(12, result.state().nextTradeOfferId);
     }
 
@@ -92,7 +111,7 @@ class NationRepositoryTest {
         Path file = directory.resolve("nationwars.json");
         Files.writeString(file, "{broken", StandardCharsets.UTF_8);
         Files.writeString(directory.resolve("nationwars.json.bak"),
-            "{\"dataVersion\":1,\"nextSpyMissionId\":42}", StandardCharsets.UTF_8);
+            "{\"dataVersion\":2,\"nextSpyMissionId\":42}", StandardCharsets.UTF_8);
 
         NationRepository.LoadResult result = new NationRepository(file).load();
 
@@ -105,7 +124,7 @@ class NationRepositoryTest {
     void promotesACompleteInterruptedTemporaryWriteWhenMainIsMissing() throws Exception {
         Path file = directory.resolve("nationwars.json");
         Files.writeString(directory.resolve("nationwars.json.tmp"),
-            "{\"dataVersion\":1,\"nextLandPurchaseOfferId\":19}", StandardCharsets.UTF_8);
+            "{\"dataVersion\":2,\"nextLandPurchaseOfferId\":19}", StandardCharsets.UTF_8);
 
         NationRepository.LoadResult result = new NationRepository(file).load();
 
@@ -118,7 +137,7 @@ class NationRepositoryTest {
     @Test
     void missingOptionalFieldsReceiveSchemaDefaultsAndUnknownRootsSurviveSave() throws Exception {
         Path file = directory.resolve("nationwars.json");
-        Files.writeString(file, "{\"dataVersion\":1,\"nations\":{\"alpha\":{\"id\":\"alpha\",\"futureNationField\":17}},\"futureFeature\":{\"kept\":true}}", StandardCharsets.UTF_8);
+        Files.writeString(file, "{\"dataVersion\":2,\"nations\":{\"alpha\":{\"id\":\"alpha\",\"futureNationField\":17}},\"futureFeature\":{\"kept\":true}}", StandardCharsets.UTF_8);
         NationRepository repository = new NationRepository(file);
 
         NationRepository.LoadResult result = repository.load();
@@ -130,6 +149,64 @@ class NationRepositoryTest {
         assertTrue(saved.contains("\"futureFeature\""));
         assertTrue(saved.contains("\"kept\": true"));
         assertTrue(saved.contains("\"futureNationField\": 17"));
+    }
+
+    @Test
+    void puppetRelationsAndProposalsRoundTripEveryPersistedField() throws Exception {
+        Path file = directory.resolve("nationwars.json");
+        Files.writeString(file, """
+            {
+              "dataVersion": 2,
+              "nations": {
+                "master": {"id":"master","name":"Master"},
+                "puppet": {"id":"puppet","name":"Puppet"},
+                "candidate": {"id":"candidate","name":"Candidate"}
+              },
+              "puppetRelations": {
+                "puppet": {
+                  "master":"master",
+                  "puppet":"puppet",
+                  "independencePoints":167,
+                  "lostIndependenceWars":2,
+                  "agitateCooldownUntil":1111,
+                  "pacifyCooldownUntil":2222,
+                  "tradePointCooldownUntil":3333
+                }
+              },
+              "puppetProposals": {
+                "master->candidate": {
+                  "master":"master",
+                  "puppet":"candidate",
+                  "createdTick":4444
+                }
+              }
+            }
+            """, StandardCharsets.UTF_8);
+
+        NationRepository repository = new NationRepository(file);
+        NationRepository.LoadResult firstLoad = repository.load();
+        NationStore.PuppetRelation relation = firstLoad.state().puppetRelations.get("puppet");
+        assertEquals("master", relation.master);
+        assertEquals("puppet", relation.puppet);
+        assertEquals(167, relation.independencePoints);
+        assertEquals(2, relation.lostIndependenceWars);
+        assertEquals(1111L, relation.agitateCooldownUntil);
+        assertEquals(2222L, relation.pacifyCooldownUntil);
+        assertEquals(3333L, relation.tradePointCooldownUntil);
+        NationStore.PuppetProposal proposal = firstLoad.state().puppetProposals.get("master->candidate");
+        assertEquals("master", proposal.master);
+        assertEquals("candidate", proposal.puppet);
+        assertEquals(4444L, proposal.createdTick);
+
+        repository.save(firstLoad.state());
+        NationRepository.LoadResult secondLoad = new NationRepository(file).load();
+        NationStore.PuppetRelation roundTripped = secondLoad.state().puppetRelations.get("puppet");
+        assertEquals(167, roundTripped.independencePoints);
+        assertEquals(2, roundTripped.lostIndependenceWars);
+        assertEquals(1111L, roundTripped.agitateCooldownUntil);
+        assertEquals(2222L, roundTripped.pacifyCooldownUntil);
+        assertEquals(3333L, roundTripped.tradePointCooldownUntil);
+        assertEquals(4444L, secondLoad.state().puppetProposals.get("master->candidate").createdTick);
     }
 
     @Test

@@ -38,7 +38,7 @@ class TranslationValidationTest {
     @Test
     void languageCatalogsAreValidCompleteAndCompatible() throws IOException {
         Map<String, String> english = readCatalog(LANG.resolve("en_us.json"));
-        for (String catalogName : List.of("ro_ro.json", "es_es.json")) {
+        for (String catalogName : List.of("ro_ro.json", "es_es.json", "pl_pl.json")) {
             Map<String, String> translated = readCatalog(LANG.resolve(catalogName));
             assertEquals(english.keySet(), translated.keySet(),
                 () -> "English and " + catalogName + " translation keys differ");

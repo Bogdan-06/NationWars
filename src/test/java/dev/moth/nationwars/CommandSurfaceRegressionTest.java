@@ -1,0 +1,69 @@
+package dev.moth.nationwars;
+
+import org.junit.jupiter.api.Test;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.regex.Pattern;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/** Guards checklist command-surface removals that are otherwise difficult to exercise without a running server. */
+class CommandSurfaceRegressionTest {
+    private static final Path JAVA = Path.of("src/main/java/dev/moth/nationwars");
+
+    @Test
+    void onlyConfigureSpellingIsRegistered() throws IOException {
+        String source = read("ConfigCommands.java");
+
+        assertTrue(source.contains("dispatcher.register(root(\"configure\"))"));
+        assertFalse(source.contains("root(\"configurate\")"));
+        assertFalse(source.contains("booleanSetting(\"Satelites\""));
+    }
+
+    @Test
+    void nationsShortcutRemainsDisabled() throws IOException {
+        String source = read("command/MarketCommand.java");
+
+        assertFalse(source.contains("Commands.literal(\"nations\")"));
+    }
+
+    @Test
+    void nationCreateOpensTheMenuWithoutLegacyNameOrDoctrineArguments() throws IOException {
+        String source = read("command/NationCommand.java");
+        Pattern directMenuRegistration = Pattern.compile(
+            "\\.then\\(Commands\\.literal\\(\\\"create\\\"\\)\\.executes\\(NationCommands::openNationCreateMenuUnnamed\\)\\)");
+
+        assertTrue(directMenuRegistration.matcher(source).find());
+        assertFalse(source.contains("openNationCreateMenuWithName"));
+    }
+
+    @Test
+    void nationDeletionLivesUnderConfigureAndAcceptsFullCountryNames() throws IOException {
+        String nation = read("command/NationCommand.java");
+        String configure = read("ConfigCommands.java");
+
+        assertFalse(nation.contains("Commands.literal(\"delete\")"));
+        assertTrue(configure.contains("Commands.literal(\"deletenation\")"));
+        assertTrue(configure.contains("StringArgumentType.greedyString()"));
+        assertTrue(configure.contains("store.deleteNation(nation)"));
+        assertTrue(configure.contains("OpacClaimsBridge.syncAll"));
+    }
+
+    @Test
+    void puppetRestrictionsRemainWiredIntoClaimsAndOrdinaryWars() throws IOException {
+        String source = read("NationCommands.java");
+
+        assertTrue(source.contains("!store.canPuppetClaim(nation.get())"));
+        assertTrue(source.contains("store.isPuppet(attacker)"));
+        assertTrue(source.contains("store.isMasterOf(attacker, defender)"));
+        assertTrue(source.contains("store.isMasterOf(defender, attacker)"));
+    }
+
+    private static String read(String relativePath) throws IOException {
+        return Files.readString(JAVA.resolve(relativePath), StandardCharsets.UTF_8);
+    }
+}

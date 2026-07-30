@@ -28,6 +28,12 @@ public final class DataIntegrityService {
             "former-membership reference", details);
         repaired += removeEntries(state.nationInvites, (nation, players) -> !state.nations.containsKey(nation),
             "nation invitation reference", details);
+        repaired += removeEntries(state.puppetRelations, (puppet, relation) -> relation == null
+            || !state.nations.containsKey(puppet) || !state.nations.containsKey(relation.master)
+            || !puppet.equals(relation.puppet) || puppet.equals(relation.master), "puppet relation reference", details);
+        repaired += removeEntries(state.puppetProposals, (id, proposal) -> proposal == null
+            || !state.nations.containsKey(proposal.master) || !state.nations.containsKey(proposal.puppet)
+            || proposal.master.equals(proposal.puppet), "puppet proposal reference", details);
         repaired += removeEntries(state.guarantees, (nation, guarantors) -> !state.nations.containsKey(nation),
             "guarantee target reference", details);
 
