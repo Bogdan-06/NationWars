@@ -1,6 +1,7 @@
 package dev.moth.nationwars;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
@@ -40,6 +41,15 @@ public final class ConfigCommands {
             .then(booleanSetting("Colonialism", "Colonialism", config -> config.colonialism, (config, enabled) -> config.colonialism = enabled))
             .then(booleanSetting("AllowTrade", "AllowTrade", config -> config.allowTrade, (config, enabled) -> config.allowTrade = enabled))
             .then(booleanSetting("Puppets", "Puppets", config -> config.puppets, (config, enabled) -> config.puppets = enabled))
+            .then(booleanSetting("Stealing", "Stealing", config -> config.stealing, (config, enabled) -> config.stealing = enabled))
+            .then(doubleSetting("MaintenanceMultiplierr", "MaintenanceMultiplierr", config -> config.maintenanceMultiplier,
+                (config, value) -> config.maintenanceMultiplier = value))
+            .then(doubleSetting("ClaimCostMultiplier", "ClaimCostMultiplier", config -> config.claimCostMultiplier,
+                (config, value) -> config.claimCostMultiplier = value))
+            .then(doubleSetting("IncomeMultiplier", "IncomeMultiplier", config -> config.incomeMultiplier,
+                (config, value) -> config.incomeMultiplier = value))
+            .then(integerSetting("MemberIncome", "MemberIncome", config -> config.memberIncome,
+                (config, value) -> config.memberIncome = value))
             .then(Commands.literal("deletenation").requires(source -> source.hasPermission(4))
                 .then(Commands.argument("country", StringArgumentType.greedyString())
                     .executes(ConfigCommands::deleteNation)))
@@ -70,6 +80,38 @@ public final class ConfigCommands {
                     setter.set(config, enabled);
                     if (config.save()) {
                         return ok(context, "nationwars.command.config.value", display, enabled);
+                    }
+                    setter.set(config, previous);
+                    return saveFailed(context);
+                }));
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> doubleSetting(String literal, String display,
+                                                                             DoubleGetter getter, DoubleSetter setter) {
+        return Commands.literal(literal)
+            .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0.0))
+                .executes(context -> {
+                    NationWarsConfig config = NationWarsConfig.get();
+                    double previous = getter.get(config);
+                    setter.set(config, DoubleArgumentType.getDouble(context, "amount"));
+                    if (config.save()) {
+                        return ok(context, "nationwars.command.config.value", display, getter.get(config));
+                    }
+                    setter.set(config, previous);
+                    return saveFailed(context);
+                }));
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> integerSetting(String literal, String display,
+                                                                              IntegerGetter getter, IntegerSetter setter) {
+        return Commands.literal(literal)
+            .then(Commands.argument("amount", IntegerArgumentType.integer(0))
+                .executes(context -> {
+                    NationWarsConfig config = NationWarsConfig.get();
+                    int previous = getter.get(config);
+                    setter.set(config, IntegerArgumentType.getInteger(context, "amount"));
+                    if (config.save()) {
+                        return ok(context, "nationwars.command.config.value", display, getter.get(config));
                     }
                     setter.set(config, previous);
                     return saveFailed(context);
@@ -164,6 +206,11 @@ public final class ConfigCommands {
         line(source, "Colonialism", config.colonialism);
         line(source, "AllowTrade", config.allowTrade);
         line(source, "Puppets", config.puppets);
+        line(source, "Stealing", config.stealing);
+        line(source, "MaintenanceMultiplierr", config.maintenanceMultiplier);
+        line(source, "ClaimCostMultiplier", config.claimCostMultiplier);
+        line(source, "IncomeMultiplier", config.incomeMultiplier);
+        line(source, "MemberIncome", config.memberIncome);
         source.sendSuccess(() -> NationText.tr("nationwars.command.config.spawn_protection", config.spawnProtection), false);
         Component disabled = config.disabledDoctrines.isEmpty()
             ? NationText.tr("nationwars.common.none")
@@ -173,6 +220,14 @@ public final class ConfigCommands {
     }
 
     private static void line(CommandSourceStack source, String name, boolean value) {
+        source.sendSuccess(() -> NationText.tr("nationwars.command.config.value", name, value), false);
+    }
+
+    private static void line(CommandSourceStack source, String name, double value) {
+        source.sendSuccess(() -> NationText.tr("nationwars.command.config.value", name, value), false);
+    }
+
+    private static void line(CommandSourceStack source, String name, int value) {
         source.sendSuccess(() -> NationText.tr("nationwars.command.config.value", name, value), false);
     }
 
@@ -194,5 +249,25 @@ public final class ConfigCommands {
     @FunctionalInterface
     private interface BooleanSetter {
         void set(NationWarsConfig config, boolean value);
+    }
+
+    @FunctionalInterface
+    private interface DoubleGetter {
+        double get(NationWarsConfig config);
+    }
+
+    @FunctionalInterface
+    private interface DoubleSetter {
+        void set(NationWarsConfig config, double value);
+    }
+
+    @FunctionalInterface
+    private interface IntegerGetter {
+        int get(NationWarsConfig config);
+    }
+
+    @FunctionalInterface
+    private interface IntegerSetter {
+        void set(NationWarsConfig config, int value);
     }
 }

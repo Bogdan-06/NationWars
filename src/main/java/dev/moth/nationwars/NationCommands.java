@@ -86,7 +86,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
@@ -106,19 +105,6 @@ public final class NationCommands {
     private static final int ROMANIAN_WAR_LEAVE_COOLDOWN_SECONDS = 1800;
     private static final int CREATE_NAME_TIMEOUT_SECONDS = 60;
     private static final Map<UUID, PendingNationCreation> PENDING_NATION_NAMES = new HashMap<UUID, PendingNationCreation>();
-    private static final Set<String> NATURAL_WATER_BIOMES = Set.of(
-        "minecraft:warm_ocean",
-        "minecraft:lukewarm_ocean",
-        "minecraft:deep_lukewarm_ocean",
-        "minecraft:ocean",
-        "minecraft:deep_ocean",
-        "minecraft:cold_ocean",
-        "minecraft:deep_cold_ocean",
-        "minecraft:river",
-        "minecraft:beach",
-        "minecraft:snowy_beach",
-        "minecraft:stony_shore"
-    );
 
     private NationCommands() {
     }
@@ -293,7 +279,6 @@ public final class NationCommands {
             return false;
         }
         NationStore.Nation nation = store.createNation(player, name, doctrine, capital);
-        store.setCoastClaim(capital.id(), NationCommands.isNaturalCoastClaim(player.serverLevel(), capital));
         PENDING_NATION_NAMES.remove(player.getUUID());
         NationEvents.refreshAllTabListNames(player.getServer());
         NationCommands.ok(player, "nationwars.command.nation.create.success", nation.name, NationText.doctrineName(doctrine), nation.id, capital.shortName());
@@ -583,7 +568,6 @@ public final class NationCommands {
         player.sendSystemMessage(NationText.tr("nationwars.command.nation.info.claims", store.claimCount(nation), nation.freeClaimsRemaining));
         player.sendSystemMessage(NationText.tr(doctrine == Doctrine.AMERICAN
             ? "nationwars.command.nation.info.upgrades_usa" : "nationwars.command.nation.info.upgrades", nation.upgradeLevel));
-        player.sendSystemMessage(NationText.tr("nationwars.command.nation.info.cities", nation.cityClaims.size()));
         player.sendSystemMessage(NationText.tr("nationwars.command.nation.info.treasury", NationStore.roundMoney(nation.balance)));
         player.sendSystemMessage(NationText.tr("nationwars.command.nation.info.maintenance", NationEvents.maintenanceDuePerInterval(store, nation)));
         player.sendSystemMessage(NationText.tr("nationwars.command.nation.info.income", NationEvents.currentIncomePerCycle(store, nation)));
@@ -640,7 +624,6 @@ public final class NationCommands {
             nation.get().balance = NationStore.roundMoney(nation.get().balance - cost);
         }
         store.claim(nation.get(), claim);
-        store.setCoastClaim(claim.id(), NationCommands.isNaturalCoastClaim(player.serverLevel(), claim));
         NationCommands.ok(player, "nationwars.command.claim.success", claim.shortName());
         return 1;
     }
@@ -829,43 +812,6 @@ public final class NationCommands {
         String key = viewerNation.id.equals(offer.seller)
             ? "nationwars.command.land.list_incoming" : "nationwars.command.land.list_outgoing";
         return NationText.tr(key, offer.id, buyer, offer.price, seller, claim);
-    }
-
-    public static int buyCity(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-        ServerPlayer player = ((CommandSourceStack)context.getSource()).getPlayerOrException();
-        NationStore store = NationStore.get();
-        Optional<NationStore.Nation> nation = store.nationOf(player.getUUID());
-        if (nation.isEmpty()) {
-            NationCommands.fail(player, "nationwars.command.error.create_or_join");
-            return 0;
-        }
-        if (!store.isOwner(player.getUUID(), nation.get())) {
-            NationCommands.fail(player, "nationwars.command.city.owner_only");
-            return 0;
-        }
-        if (!nation.get().doctrine().canBuyCities) {
-            NationCommands.fail(player, "nationwars.command.city.usa_only");
-            return 0;
-        }
-        ClaimKey claim = NationCommands.currentClaim(player);
-        if (!nation.get().id.equals(store.nationOwning(claim).map(owned -> owned.id).orElse(""))) {
-            NationCommands.fail(player, "nationwars.command.city.stand_in_claim");
-            return 0;
-        }
-        if (store.isCapturedClaimHeldBy(nation.get(), claim.id())) {
-            NationCommands.fail(player, "nationwars.command.city.occupied");
-            return 0;
-        }
-        double cityCost = NationCommands.claimCost(store, nation.get(), claim);
-        if (!NationCommands.canNationSpend(player, store, nation.get(), cityCost)) {
-            return 0;
-        }
-        if (!store.addCityClaim(nation.get(), claim.id(), cityCost)) {
-            NationCommands.fail(player, "nationwars.command.city.failed", NationStore.roundMoney(cityCost));
-            return 0;
-        }
-        NationCommands.ok(player, "nationwars.command.city.success", claim.shortName(), NationStore.roundMoney(cityCost));
-        return 1;
     }
 
     public static int guarantee(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
@@ -1982,30 +1928,6 @@ public final class NationCommands {
             && maxZ >= spawn.getZ() - radius && minZ <= spawn.getZ() + radius;
     }
 
-    static boolean isNaturalCoastClaim(ServerLevel level, ClaimKey claim) {
-        if (!level.dimension().equals(Level.OVERWORLD)) {
-            return false;
-        }
-        int startX = (claim.x() << 4) - 8;
-        int startZ = (claim.z() << 4) - 8;
-        int endX = (claim.x() << 4) + 23;
-        int endZ = (claim.z() << 4) + 23;
-        BlockPos.MutableBlockPos position = new BlockPos.MutableBlockPos();
-        for (int x = startX; x <= endX; x += 4) {
-            for (int z = startZ; z <= endZ; z += 4) {
-                int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-                position.set(x, y, z);
-                String biome = level.getBiome((BlockPos)position).unwrapKey()
-                    .map(key -> key.location().toString())
-                    .orElse("");
-                if (NATURAL_WATER_BIOMES.contains(biome)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
     private static boolean touchesNationClaim(NationStore store, NationStore.Nation nation, ClaimKey claim) {
         for (String owned : store.claimsOf(nation)) {
             if (store.isCapturedClaimHeldBy(nation, owned)) continue;
@@ -2030,7 +1952,8 @@ public final class NationCommands {
         if (nation.doctrine().distanceClaimScaling && nation.capitalClaim != null && !nation.capitalClaim.isBlank() && (capital = ClaimKey.parse(nation.capitalClaim)).dimension().equals(claim.dimension())) {
             distanceChunks = Math.abs(capital.x() - claim.x()) + Math.abs(capital.z() - claim.z());
         }
-        return EconomyService.claimCost(store.claimCount(nation), distanceChunks, nation.doctrine());
+        return EconomyService.claimCost(store.claimCount(nation), distanceChunks, nation.doctrine(),
+            NationWarsConfig.get().claimCostMultiplier);
     }
 
     private static boolean canDefenderRejectWar(NationStore store, NationStore.Nation attacker, NationStore.Nation defender) {

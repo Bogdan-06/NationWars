@@ -52,6 +52,11 @@ public final class NationWarsConfig {
     public boolean colonialism = false;
     public boolean allowTrade = true;
     public boolean puppets = true;
+    public boolean stealing = true;
+    public double maintenanceMultiplier = 1.0;
+    public double claimCostMultiplier = 1.0;
+    public double incomeMultiplier = 1.0;
+    public int memberIncome = 10;
     public int spawnProtection = 200;
     public Set<String> disabledDoctrines = new LinkedHashSet<String>();
 
@@ -115,10 +120,18 @@ public final class NationWarsConfig {
         this.doctrineLimits = normalizedLimits;
         this.defaultDoctrineLimit = Math.max(0, this.defaultDoctrineLimit);
         this.spawnProtection = Math.max(0, this.spawnProtection);
+        this.maintenanceMultiplier = finiteNonNegative(this.maintenanceMultiplier, 1.0);
+        this.claimCostMultiplier = finiteNonNegative(this.claimCostMultiplier, 1.0);
+        this.incomeMultiplier = finiteNonNegative(this.incomeMultiplier, 1.0);
+        this.memberIncome = Math.max(0, this.memberIncome);
         for (Doctrine doctrine : Doctrine.values()) {
             this.doctrineLimits.putIfAbsent(doctrine.id, this.defaultDoctrineLimit);
         }
         this.doctrineLimits.replaceAll((id, limit) -> limit == null ? this.defaultDoctrineLimit : Math.max(0, limit));
+    }
+
+    private static double finiteNonNegative(double value, double fallback) {
+        return Double.isFinite(value) ? Math.max(0.0, value) : fallback;
     }
 
     public boolean isDoctrineDisabled(Doctrine doctrine) {

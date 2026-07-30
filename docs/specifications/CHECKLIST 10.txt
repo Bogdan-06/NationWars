@@ -1,0 +1,24 @@
+CHECKLIST 10 - 0.5.1
+
+- DEV - Delete /nationwarsdev. /nwdev is shorter and better
+- GEN - Change maintenance cost to: Cost = (claim count - 1) * $8 * doctrine maintenance multiplier. note capital shouldn’t count.
+- CONFIG - Add MaintenanceMultiplierr <amount> (base 1), composes with doctrine (Germany 1.35*global)
+- CONFIG - Add ClaimCostMultiplier <amount> (base 1)
+- CONFIG - Add IncomeMultiplier <amount> (base 1)
+- GEN - DELETE "CAPITAL CAPTURED = END OF WAR"
+- CONFIG - Fix ScorchedEarth not working; physical hand destruction, not only TNT
+- CONFIG - Add Stealing [t/f], default true; enables/disables enemy-claim access for members of a nation. Nationless can still access when off.
+- GEN - cannot send trade offers to nation at war
+- USA - Delete Isolation
+- GEN - Delete /nation city
+- USA - Wall Street Crash: lose $200 per lost claim at war
+- USA - Capitalism -> gain x1.5 normal passive income
+- GEN - cap income member count to first 10
+- ENG - Delete Ports
+- ENG - Colonial manpower: twice money per nation member
+- CONFIG - MemberIncome <amount> default10 (how many members counted)
+- USA - Rename Capitalism to American Dream
+- ENG - Delete Sea Lion
+- ENG - Urban Sprawl: maintenance 1.5x when member-claim ratio 1/5 or higher
+- ITA - Delete Alpes
+- ITA - War Propaganda: maintenance0.8x at war

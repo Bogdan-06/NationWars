@@ -24,7 +24,7 @@ import net.minecraft.resources.ResourceLocation;
 public enum Doctrine {
     GERMAN("GER", "Germany", Ideology.FASCIST, 1.0, 1.0, 1.35, 4, 35, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, false, false, false, false),
     SOVIET("SOV", "Soviet Union", Ideology.COMMUNIST, 0.8, 1.0, 0.5, 4, 50, 1.0, 1.0, 1.25, 1.0, 1.0, false, false, false, false, false, false, false, false),
-    AMERICAN("USA", "United States", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 4, 50, 1.0, 1.0, 0.8, 1.0, 1.0, true, true, true, true, false, false, false, false),
+    AMERICAN("USA", "United States", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 4, 50, 1.0, 1.0, 0.8, 1.0, 1.0, true, false, true, false, false, false, false, false),
     FRENCH("FRA", "France", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 4, 50, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, false, false, false, false),
     BRITISH("ENG", "United Kingdom", Ideology.DEMOCRATIC, 1.0, 1.0, 1.0, 6, 50, 1.0, 1.0, 1.0, 1.0, 3.0, false, false, true, false, false, false, false, false),
     ITALIAN("ITA", "Italy", Ideology.FASCIST, 1.0, 1.0, 1.0, 4, 50, 1.0, 1.0, 1.0, 1.0, 1.0, false, false, true, false, true, true, false, false),
@@ -251,10 +251,10 @@ public enum Doctrine {
         return switch (id) {
             case "GER" -> List.of("+ Blitzkrieg: enemy claims take 35s to capture", "+ Gleiwitz Incident: war justification is 40s faster", "- War Reparations: claim maintenance costs 1.35x", "- Turing's Bombe: counterspies block only 50% of attacks");
             case "SOV" -> List.of("+ Mother Russia: claims and maintenance cost less", "+ Great Patriotic War: land takes twice as long", "  to conquer unless 2 attackers are present", "- Collectivity: capital starts at $0; upgrades and member income still apply", "- Yellow Curtains: market purchases cost 1.25x");
-            case "USA" -> List.of("+ Capitalism: pay claim cost for city income", "  worth 0.2x capital income", "+ Worldwide Economy: market prices are 0.8x", "- Pacifism: cannot declare wars", "- Isolation: distance from the capital raises claim cost");
+            case "USA" -> List.of("+ American Dream: passive capital income is 1.5x", "+ Worldwide Economy: market prices are 0.8x", "- Pacifism: cannot declare wars", "- Wall Street Crash: lose $200 per claim lost in war");
             case "FRA" -> List.of("+ Spy Master: 5 extra spies costing $300 each", "+ The Maginot Line: your land takes 25s longer to capture", "- Casus Foederis: declining defense costs 3x", "- No War Support: offensive-war maintenance is 1.5x");
-            case "ENG" -> List.of("+ Ports: coast claims pay 0.1x capital income", "+ Colonies: more starter claims", "- Sea Lion: coast claims are captured 10s faster", "- Neville Chamberlain: peace offers cost 3x more");
-            case "ITA" -> List.of("+ Developed Infrastructure: Speed II on owned claims", "  while at peace, Speed I while at war, and", "  successful building rewards pay $2", "+ Alpes: mountain and hilly claims take 15s longer", "- Push-over: nations with more claims can reject once", "- Kingdom of the South: recapturing core claims takes 10s longer");
+            case "ENG" -> List.of("+ Colonial Manpower: member income is doubled", "+ Colonies: more starter claims", "- Urban Sprawl: maintenance is 1.5x at five claims per member", "- Neville Chamberlain: peace offers cost 3x more");
+            case "ITA" -> List.of("+ Developed Infrastructure: Speed II on owned claims", "  while at peace, Speed I while at war, and", "  successful building rewards pay $2", "+ War Propaganda: maintenance is 0.8x while at war", "- Push-over: nations with more claims can reject once", "- Kingdom of the South: recapturing core claims takes 10s longer");
             case "ROM" -> List.of("+ King Michael's Coup: one safe leave per ideology", "+ Flexible Foreign Policy: enemies justify 30s longer", "- Iron Guard: losing a core claim raises maintenance 0.1x", "- Carol II Lifestyle: drains money until all leaves are used");
             default -> List.of();
         };

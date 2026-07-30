@@ -20,7 +20,6 @@ public final class DevCommands {
     public static void register(RegisterCommandsEvent event) {
         CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
         dispatcher.register(command("nwdev"));
-        dispatcher.register(command("nationwarsdev"));
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> command(String name) {

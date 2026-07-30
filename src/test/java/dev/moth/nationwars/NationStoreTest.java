@@ -46,10 +46,25 @@ final class NationStoreTest {
     }
 
     @Test
-    void versionFourDoctrineDefaultsMatchChecklist() {
+    void checklistTenDoctrineDefaultsMatchTheReleaseRules() {
         assertEquals(0.5, Doctrine.SOVIET.maintenanceMultiplier);
         assertEquals(1.25, Doctrine.SOVIET.marketBuyMultiplier);
         assertEquals(0.8, Doctrine.AMERICAN.marketBuyMultiplier);
+        // American Dream is passive-capital-only; resource rewards retain the
+        // existing doctrine income multiplier.
+        assertEquals(1.0, Doctrine.AMERICAN.incomeMultiplier);
+        assertFalse(Doctrine.AMERICAN.distanceClaimScaling);
+        assertFalse(Doctrine.AMERICAN.canBuyCities);
+    }
+
+    @Test
+    void checklistTenServerConfigurationDefaultsPreserveNormalGameplay() {
+        NationWarsConfig config = NationWarsConfig.get();
+        assertTrue(config.stealing);
+        assertEquals(1.0, config.maintenanceMultiplier);
+        assertEquals(1.0, config.claimCostMultiplier);
+        assertEquals(1.0, config.incomeMultiplier);
+        assertEquals(10, config.memberIncome);
     }
 
     @Test

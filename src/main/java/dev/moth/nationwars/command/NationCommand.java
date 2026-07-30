@@ -33,7 +33,6 @@ public final class NationCommand {
                 .then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::openTradeMenu)))
             .then(Commands.literal("upgrade").executes(NationCommands::upgradeNation))
             .then(Commands.literal("unclaim").executes(NationCommands::unclaim))
-            .then(Commands.literal("city").executes(NationCommands::buyCity))
             .then(Commands.literal("guarantee")
                 .then(Commands.literal("remove").then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::removeGuarantee)))
                 .then(Commands.argument("country", StringArgumentType.word()).executes(NationCommands::guarantee)))

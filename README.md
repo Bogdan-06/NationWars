@@ -1,12 +1,12 @@
 # Nation Wars
 
-Development project for Nation Wars 0.5.0.
+Development project for Nation Wars 0.5.1.
 
 Nation Wars is a server-side NeoForge mod providing nations, chunk claims,
 economy, markets, alliances, war, peace deals, doctrine bonuses, and integration
 with Open Parties and Claims.
 
-Version 0.5.0 adds voluntary and peace-deal puppeting, independence points,
+Version 0.5.0 added voluntary and peace-deal puppeting, independence points,
 independence wars, manual release/annexation, and a 20% puppet-income tax. It
 also changes the passive-income payout to $120 every ten minutes plus $8 for
 each member after the first, adds the capital chunk and current payout to
@@ -16,7 +16,14 @@ nation creation, and applies the doctrine changes listed in the changelog.
 Use `/configure` as an operator to review server settings. Examples:
 `/configure LimitedDoctrines t`, `/configure DisableEspionage false`,
 `/configure Puppets true`, `/configure Colonialism false`, and
-`/configure SpawnProtection 200`. The old `/configurate` spelling and the
+`/configure SpawnProtection 200`. Version 0.5.1 also provides
+`/configure Stealing <true|false>`,
+`/configure MaintenanceMultiplierr <amount>`,
+`/configure ClaimCostMultiplier <amount>`,
+`/configure IncomeMultiplier <amount>`, and
+`/configure MemberIncome <amount>`. `MaintenanceMultiplierr` intentionally
+retains the checklist's double-r command spelling. The old `/configurate`
+spelling and the
 misspelled `Satelites` setting alias are no longer registered; the correctly
 spelled `/configure Satellites` setting remains available.
 
@@ -45,6 +52,13 @@ large countries support paged claim lists.
 After any mission, the spy enters a 60-second `recovering` cooldown and then
 automatically becomes `stationed` in the same country again. `/spy status`
 shows the remaining recovery time.
+
+Version 0.5.1 removes the city and port income systems, makes an owned capital
+free from maintenance, and adds server controls for maintenance, claim cost,
+capital income, counted members, and protected-container access. It also
+updates the American, British, and Italian doctrine effects described in the
+changelog. Capital capture is now an ordinary wartime claim capture; a nation
+is eliminated only when it loses all territory.
 
 All long-running timers survive server restarts. Nation data is saved through
 an atomic temporary file with a rolling `nationwars.json.bak` backup; malformed
@@ -86,7 +100,7 @@ Regression tests:
 
 ## Development commands
 
-Permission-level-4 operators can use `/nwdev` (or `/nationwarsdev`) to set
+Permission-level-4 operators can use `/nwdev` to set
 player money, set a nation treasury, change a doctrine, finish spy timers, save
 data, or synchronize OPAC claims. Permission-level-4 operators can use
 `/configure deletenation <country>` for an audited administrative deletion;

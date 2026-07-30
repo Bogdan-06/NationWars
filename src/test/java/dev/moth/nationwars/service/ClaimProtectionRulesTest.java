@@ -14,4 +14,12 @@ class ClaimProtectionRulesTest {
         assertFalse(ClaimProtectionRules.disableForEnemyWarClaim(true, true, true, false));
         assertFalse(ClaimProtectionRules.disableForEnemyWarClaim(true, true, false, true));
     }
+
+    @Test
+    void stealingOnlyBlocksPaidAccessForVisitorsWhoBelongToANation() {
+        assertTrue(ClaimProtectionRules.paidAccessAllowed(true, true));
+        assertTrue(ClaimProtectionRules.paidAccessAllowed(true, false));
+        assertTrue(ClaimProtectionRules.paidAccessAllowed(false, false));
+        assertFalse(ClaimProtectionRules.paidAccessAllowed(false, true));
+    }
 }

@@ -9,4 +9,8 @@ public final class ClaimProtectionRules {
                                                    boolean peacePending, boolean respawnLocked) {
         return scorchedEarth && activeWar && !peacePending && !respawnLocked;
     }
+
+    public static boolean paidAccessAllowed(boolean stealing, boolean visitorHasNation) {
+        return stealing || !visitorHasNation;
+    }
 }

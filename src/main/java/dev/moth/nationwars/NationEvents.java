@@ -65,7 +65,6 @@ import dev.moth.nationwars.NationWars;
 import dev.moth.nationwars.NationWarsConfig;
 import dev.moth.nationwars.OpacClaimsBridge;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -82,8 +81,6 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerBossEvent;
 import net.minecraft.server.level.ServerLevel;
@@ -112,7 +109,6 @@ import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
@@ -140,19 +136,6 @@ public final class NationEvents {
     private static final long ACTION_ACCESS_PASS_TICKS = 2L;
     private static final int OPAC_SYNC_RETRY_INTERVAL_TICKS = 200;
     private static final Random RANDOM = new Random();
-    private static final Set<String> NATURAL_WATER_BIOMES = Set.of(
-        "minecraft:warm_ocean",
-        "minecraft:lukewarm_ocean",
-        "minecraft:deep_lukewarm_ocean",
-        "minecraft:ocean",
-        "minecraft:deep_ocean",
-        "minecraft:cold_ocean",
-        "minecraft:deep_cold_ocean",
-        "minecraft:river",
-        "minecraft:beach",
-        "minecraft:snowy_beach",
-        "minecraft:stony_shore"
-    );
     private static final Set<String> NO_BUILD_REWARD_BLOCKS = Set.of("dirt", "grass_block", "coarse_dirt", "rooted_dirt", "podzol", "mycelium", "mud", "sand", "red_sand", "gravel", "clay", "stone", "cobblestone", "deepslate", "cobbled_deepslate", "netherrack", "end_stone", "snow", "snow_block", "ice", "packed_ice", "blue_ice", "oak_leaves", "spruce_leaves", "birch_leaves", "jungle_leaves", "acacia_leaves", "dark_oak_leaves", "mangrove_leaves", "cherry_leaves", "azalea_leaves", "flowering_azalea_leaves", "short_grass", "tall_grass", "fern", "large_fern", "torch", "soul_torch", "redstone_torch", "scaffolding");
     private static long nextIncomeTick = -1L;
     private static long nextMaintenanceTick = -1L;
@@ -175,7 +158,6 @@ public final class NationEvents {
         OpacClaimsBridge.forceMaxPlayerClaimsZero();
         OpacClaimsBridge.activatePrimaryPartySystem(event.getServer());
         NationStore.load(event.getServer());
-        NationEvents.migrateNaturalCoastClaims(event.getServer());
         NationEvents.refreshAllTabListNames(event.getServer());
         long tick = event.getServer().getTickCount();
         nextIncomeTick = tick + INCOME_INTERVAL_TICKS;
@@ -300,6 +282,7 @@ public final class NationEvents {
         if (!(player2 instanceof ServerPlayer player)) {
             return;
         }
+        NationEvents.refreshScorchedEarthPass(player);
         if (player.tickCount % 20 != 0) {
             return;
         }
@@ -310,7 +293,7 @@ public final class NationEvents {
         NationEvents.handleCaptureTick(player);
     }
 
-    @SubscribeEvent(priority=EventPriority.HIGHEST)
+    @SubscribeEvent(priority=EventPriority.HIGHEST, receiveCanceled=true)
     public static void blockBreakAccess(BlockEvent.BreakEvent event) {
         Player player = event.getPlayer();
         if (!(player instanceof ServerPlayer)) {
@@ -332,7 +315,9 @@ public final class NationEvents {
             player2.displayClientMessage(NationText.tr("nationwars.war.scorched_earth.break_blocked"), true);
             return;
         }
-        NationEvents.grantClaimActionPassIfNeeded(player2, event.getPos(), player2.getServer().getTickCount());
+        if (NationEvents.grantClaimActionPassIfNeeded(player2, event.getPos(), player2.getServer().getTickCount())) {
+            event.setCanceled(false);
+        }
     }
 
     @SubscribeEvent(priority=EventPriority.LOWEST, receiveCanceled=true)
@@ -358,7 +343,7 @@ public final class NationEvents {
         }
     }
 
-    @SubscribeEvent(priority=EventPriority.HIGHEST)
+    @SubscribeEvent(priority=EventPriority.HIGHEST, receiveCanceled=true)
     public static void blockPlaceAccess(BlockEvent.EntityPlaceEvent event) {
         Entity entity = event.getEntity();
         if (!(entity instanceof ServerPlayer)) {
@@ -375,7 +360,9 @@ public final class NationEvents {
             player.displayClientMessage(NationText.tr("nationwars.war.scorched_earth.build_blocked"), true);
             return;
         }
-        NationEvents.grantClaimActionPassIfNeeded(player, event.getPos(), player.getServer().getTickCount());
+        if (NationEvents.grantClaimActionPassIfNeeded(player, event.getPos(), player.getServer().getTickCount())) {
+            event.setCanceled(false);
+        }
     }
 
     @SubscribeEvent(priority=EventPriority.HIGHEST)
@@ -477,6 +464,13 @@ public final class NationEvents {
             NationEvents.grantActionOpacPass(player2, tick);
             return;
         }
+        boolean visitorHasNation = store.nationOf(player2.getUUID()).isPresent();
+        if (!ClaimProtectionRules.paidAccessAllowed(NationWarsConfig.get().stealing, visitorHasNation)) {
+            event.setCancellationResult(InteractionResult.FAIL);
+            event.setCanceled(true);
+            player2.sendSystemMessage(NationText.message("nationwars.claim.access.stealing_disabled"));
+            return;
+        }
         if (NationEvents.isPeacePendingWarClaim(player2, owner.get())) {
             event.setCancellationResult(InteractionResult.FAIL);
             event.setCanceled(true);
@@ -517,17 +511,12 @@ public final class NationEvents {
         }
     }
 
-    @SubscribeEvent(priority=EventPriority.HIGHEST)
+    @SubscribeEvent(priority=EventPriority.HIGHEST, receiveCanceled=true)
     public static void leftClickBlockAccess(PlayerInteractEvent.LeftClickBlock event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            NationEvents.grantClaimActionPassIfNeeded(player, event.getPos(), player.getServer().getTickCount());
-        }
-    }
-
-    @SubscribeEvent(priority=EventPriority.LOWEST, receiveCanceled=true)
-    public static void leftClickBlockCleanup(PlayerInteractEvent.LeftClickBlock event) {
-        if (event.getEntity() instanceof ServerPlayer player) {
-            NationEvents.revokeTemporaryOpacPass(player);
+            if (NationEvents.grantClaimActionPassIfNeeded(player, event.getPos(), player.getServer().getTickCount())) {
+                event.setCanceled(false);
+            }
         }
     }
 
@@ -652,13 +641,10 @@ public final class NationEvents {
         long tick = NationStore.persistentNow();
         List<String> ownedClaims = store.claimsOf(nation);
         boolean capitalActive = nation.capitalClaim != null && !nation.capitalClaim.isBlank()
-            && !store.isClaimParalyzed(nation.capitalClaim, tick);
-        int activeCoasts = (int)ownedClaims.stream()
-            .filter(claimId -> !store.isClaimParalyzed(claimId, tick) && store.isCoastClaim(claimId)).count();
-        int activeCities = (int)nation.cityClaims.stream()
-            .filter(ownedClaims::contains).filter(claimId -> !store.isClaimParalyzed(claimId, tick)).count();
+            && ownedClaims.contains(nation.capitalClaim) && !store.isClaimParalyzed(nation.capitalClaim, tick);
+        NationWarsConfig config = NationWarsConfig.get();
         return EconomyService.currentIncomePerCycle(nation.doctrine(), nation.upgradeLevel,
-            capitalActive, activeCoasts, activeCities, nation.members.size());
+            capitalActive, nation.members.size(), config.memberIncome, config.incomeMultiplier);
     }
 
     static double capitalIncomePerCycle(NationStore.Nation nation) {
@@ -669,10 +655,13 @@ public final class NationEvents {
     }
 
     static double maintenanceDuePerInterval(NationStore store, NationStore.Nation nation) {
+        List<String> ownedClaims = store.claimsOf(nation);
         int lostCoreClaims = nation.lostCoreClaims == null ? 0 : nation.lostCoreClaims.size();
         boolean declaredActiveWar = store.wars().stream().anyMatch(war -> war.active && nation.id.equals(war.attacker));
-        return EconomyService.maintenanceDue(store.claimCount(nation), store.capturedClaimsHeldBy(nation),
-            nation.doctrine(), declaredActiveWar, lostCoreClaims, nation.lostCoreTerritory);
+        boolean anyActiveWar = !store.activeWarsOf(nation).isEmpty();
+        return EconomyService.maintenanceDue(ownedClaims.size(), store.capturedClaimsHeldBy(nation),
+            ownedClaims.contains(nation.capitalClaim), nation.members.size(), nation.doctrine(), declaredActiveWar,
+            anyActiveWar, lostCoreClaims, nation.lostCoreTerritory, NationWarsConfig.get().maintenanceMultiplier);
     }
 
     private static boolean isCarolLifestyleActive(NationStore.Nation nation) {
@@ -764,14 +753,12 @@ public final class NationEvents {
         NationEvents.updateCaptureBar(player.getServer(), player.getUUID(), progressKey, defender.get(),
             NationText.tr("nationwars.war.capture.label.active", attacker.get().name, defender.get().name, claim.shortName()), progress.seconds, required, BossEvent.BossBarColor.GREEN);
         if (progress.seconds >= required) {
-            boolean capitalCaptured = claim.id().equals(defender.get().capitalClaim);
-            boolean capturedWarCore = store.isCoreClaimForWar(war, defender.get(), claim.id());
-            int defenderClaimsBefore = store.claimCount(defender.get());
             if (!store.captureClaim(war, attacker.get(), defender.get(), claim.id())) {
                 NationEvents.removeCapture(progressKey);
                 return;
             }
-            if (store.isIndependenceWar(war) && (capitalCaptured || store.claimCount(defender.get()) <= 0)) {
+            NationEvents.applyWarClaimLossPenalty(player.getServer(), defender.get(), claim);
+            if (store.isIndependenceWar(war) && store.claimCount(defender.get()) <= 0) {
                 NationStore.Nation puppet = store.nationById(war.independencePuppet).orElse(null);
                 NationStore.Nation master = puppet == null ? null : store.masterOf(puppet).orElse(null);
                 boolean puppetWon = master != null && defender.get().id.equals(master.id);
@@ -791,11 +778,6 @@ public final class NationEvents {
                 NationEvents.removeCapture(progressKey);
                 return;
             }
-            if (capitalCaptured) {
-                NationEvents.applyCapitulation(player.getServer(), store, war, attacker.get(), defender.get(), defenderClaimsBefore, capturedWarCore ? 1 : 0);
-                NationEvents.removeCapture(progressKey);
-                return;
-            }
             store.save();
             NationEvents.removeCapture(progressKey);
             store.notifyNation(player.getServer(), attacker.get(), NationText.tr("nationwars.war.capture.attacker_notice", claim.shortName(), defender.get().name));
@@ -805,78 +787,19 @@ public final class NationEvents {
 
     private static int requiredCaptureSeconds(ServerPlayer player, NationStore.Nation attacker, NationStore.Nation defender, NationStore.War war, ClaimKey claim) {
         NationStore store = NationStore.get();
-        return WarService.captureSeconds(attacker.doctrine(), defender.doctrine(), store.isCoastClaim(claim.id()),
-            NationEvents.isHillOrMountainClaim(player.serverLevel(), claim),
+        return WarService.captureSeconds(attacker.doctrine(), defender.doctrine(),
             store.isCapturedClaimTracked(war, claim.id()) && store.isCoreClaimForWar(war, attacker, claim.id()),
             NationEvents.attackersPresent(player, war, attacker));
     }
 
-    private static boolean isCoastOrRiverClaim(ServerLevel level, ClaimKey claim) {
-        if (!level.dimension().equals(Level.OVERWORLD)) {
-            return false;
-        }
-        int startX = (claim.x() << 4) - 8;
-        int startZ = (claim.z() << 4) - 8;
-        int endX = (claim.x() << 4) + 23;
-        int endZ = (claim.z() << 4) + 23;
-        BlockPos.MutableBlockPos position = new BlockPos.MutableBlockPos();
-        for (int x = startX; x <= endX; x += 4) {
-            for (int z = startZ; z <= endZ; z += 4) {
-                int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-                position.set(x, y, z);
-                String biome = level.getBiome((BlockPos)position).unwrapKey()
-                    .map(key -> key.location().toString())
-                    .orElse("");
-                if (NATURAL_WATER_BIOMES.contains(biome)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private static boolean isCoastOrRiverClaim(MinecraftServer server, String claimId) {
-        try {
-            ClaimKey claim = ClaimKey.parse(claimId);
-            ResourceKey key = ResourceKey.create((ResourceKey)Registries.DIMENSION, (ResourceLocation)ResourceLocation.parse((String)claim.dimension()));
-            ServerLevel level = server.getLevel(key);
-            return level != null && NationEvents.isCoastOrRiverClaim(level, claim);
-        }
-        catch (RuntimeException exception) {
-            return false;
-        }
-    }
-
-    private static void migrateNaturalCoastClaims(MinecraftServer server) {
-        NationStore store = NationStore.get();
-        if (store.coastClaimsMigrated()) {
+    private static void applyWarClaimLossPenalty(MinecraftServer server, NationStore.Nation defender, ClaimKey claim) {
+        double penalty = EconomyService.warClaimLossPenalty(defender.doctrine());
+        if (penalty <= 0.0) {
             return;
         }
-        Set<String> detectedCoasts = new HashSet<String>();
-        for (NationStore.Nation nation : store.nations()) {
-            for (String claimId : store.claimsOf(nation)) {
-                if (NationEvents.isCoastOrRiverClaim(server, claimId)) {
-                    detectedCoasts.add(claimId);
-                }
-            }
-        }
-        store.finishCoastClaimsMigration(detectedCoasts);
-        NationWars.LOGGER.info("Migrated natural-water status for {} existing claims.", (Object)detectedCoasts.size());
-    }
-
-    private static boolean isHillOrMountainClaim(ServerLevel level, ClaimKey claim) {
-        int startX = claim.x() << 4;
-        int startZ = claim.z() << 4;
-        int minY = Integer.MAX_VALUE;
-        int maxY = Integer.MIN_VALUE;
-        for (int x = startX; x < startX + 16; x += 4) {
-            for (int z = startZ; z < startZ + 16; z += 4) {
-                int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-                minY = Math.min(minY, surfaceY);
-                maxY = Math.max(maxY, surfaceY);
-            }
-        }
-        return maxY >= 95 || maxY - minY >= 18;
+        defender.balance = NationStore.roundMoney(defender.balance - penalty);
+        NationStore.get().notifyNation(server, defender,
+            NationText.message("nationwars.doctrine.united_states.wall_street_crash", claim.shortName(), penalty));
     }
 
     private static int attackersPresent(ServerPlayer reference, NationStore.War war, NationStore.Nation attacker) {
@@ -1188,19 +1111,32 @@ public final class NationEvents {
         return true;
     }
 
-    private static void grantClaimActionPassIfNeeded(ServerPlayer player, BlockPos pos, long tick) {
+    private static boolean grantClaimActionPassIfNeeded(ServerPlayer player, BlockPos pos, long tick) {
         NationStore store = NationStore.get();
         ClaimKey claim = ClaimKey.of(player.serverLevel(), new ChunkPos(pos));
         Optional<NationStore.Nation> owner = store.nationOwning(claim);
         if (owner.isEmpty()) {
-            return;
+            return false;
         }
         if (store.isRaidActive(claim.id(), NationStore.persistentNow()) || store.isMember(player.getUUID(), owner.get())) {
             NationEvents.grantActionOpacPass(player, tick);
-            return;
+            return true;
         }
         if (NationEvents.shouldDisableClaimProtectionFor(player, owner.get(), tick)) {
             NationEvents.grantActionOpacPass(player, tick);
+            return true;
+        }
+        return false;
+    }
+
+    private static void refreshScorchedEarthPass(ServerPlayer player) {
+        long tick = player.getServer().getTickCount();
+        NationStore store = NationStore.get();
+        NationStore.Nation owner = store.nationOwning(ClaimKey.of(player.serverLevel(), player.chunkPosition())).orElse(null);
+        if (owner != null && NationEvents.shouldDisableClaimProtectionFor(player, owner, tick)) {
+            NationEvents.grantActionOpacPass(player, tick);
+        } else if (OPAC_FULL_PASSES.containsKey(player.getUUID())) {
+            NationEvents.revokeTemporaryOpacPass(player);
         }
     }
 
@@ -1267,32 +1203,6 @@ public final class NationEvents {
 
     private static void grantActionOpacPass(ServerPlayer player, long tick) {
         NationEvents.grantTemporaryOpacPass(player, tick + ACTION_ACCESS_PASS_TICKS);
-    }
-
-    private static void applyCapitulation(MinecraftServer server, NationStore store, NationStore.War war, NationStore.Nation attacker, NationStore.Nation defender, int defenderClaimsBefore, int alreadyTransferred) {
-        Optional<String> claim;
-        int warCoreClaims = store.coreClaimCountForWar(war, defender);
-        int surrenderBase = warCoreClaims > 0 ? warCoreClaims : defenderClaimsBefore;
-        int target = Math.max(1, (int)Math.ceil((double)surrenderBase * 0.25 * defender.doctrine().surrenderLandMultiplier));
-        for (int transferred = alreadyTransferred; transferred < target && !(claim = store.borderClaimsOf(defender).stream()
-            .filter(id -> !id.equals(defender.capitalClaim) && store.isCoreClaimForWar(war, defender, id)
-                && !store.isClaimCapturedInOtherActiveWar(war, id)).findFirst()).isEmpty(); ++transferred) {
-            if (!store.captureClaim(war, attacker, defender, claim.get())) {
-                break;
-            }
-        }
-        store.notifyNation(server, attacker, NationText.message("nationwars.war.capitulation.attacker", defender.name));
-        store.notifyNation(server, defender, NationText.message("nationwars.war.capitulation.defender"));
-        if (store.claimCount(defender) <= 0) {
-            NationEvents.eliminateNation(server, store, war, attacker, defender);
-            return;
-        }
-        if (store.isPrimaryWarParticipant(war, defender)) {
-            store.endWar(war);
-        } else {
-            store.removeWarParticipant(war, defender);
-            store.notifyNation(server, attacker, NationText.message("nationwars.war.capitulation.continues", defender.name));
-        }
     }
 
     private static void eliminateNation(MinecraftServer server, NationStore store, NationStore.War war, NationStore.Nation conqueror, NationStore.Nation defeated) {

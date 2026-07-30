@@ -18,19 +18,12 @@ public final class WarService {
         return Math.max(10, seconds);
     }
 
-    public static int captureSeconds(Doctrine attacker, Doctrine defender, boolean defenderCoast,
-                                     boolean defenderHillOrMountain, boolean italianRecapture,
+    public static int captureSeconds(Doctrine attacker, Doctrine defender, boolean italianRecapture,
                                      int attackersPresent) {
-        // Modifier order is contractual: flat terrain/doctrine changes precede the Soviet doubling.
+        // Flat doctrine changes precede the Soviet doubling.
         double required = attacker.captureSeconds * defender.defenseCaptureMultiplier;
         if (defender == Doctrine.FRENCH) {
             required += 25.0;
-        }
-        if (defender == Doctrine.BRITISH && defenderCoast) {
-            required -= 10.0;
-        }
-        if (defender == Doctrine.ITALIAN && defenderHillOrMountain) {
-            required += 15.0;
         }
         if (attacker == Doctrine.ITALIAN && italianRecapture) {
             required += 10.0;

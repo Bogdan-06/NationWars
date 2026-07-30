@@ -1,9 +1,9 @@
-# Nation Wars 0.5.0 current-behavior contract
+# Nation Wars 0.5.1 current-behavior contract
 
 This document started as the behavior contract for the pre-maintenance 0.4.0
-source. It now records that inherited behavior together with the changes
-explicitly authorized by `Checklist 9.txt` and `Puppets.txt` for 0.5.0. Rules
-not listed as a 0.5.0 change remain compatibility-locked.
+source. It records that inherited behavior together with the changes explicitly
+authorized by `Checklist 9.txt`, `Puppets.txt`, and `CHECKLIST 10.txt`. Rules
+not listed as a 0.5.0 or 0.5.1 change remain compatibility-locked.
 
 Baseline archive:
 `nationwars-0.4.0-pre-quality-pass_2026-07-12_161732.zip`  
@@ -13,9 +13,13 @@ Checklist 9 backup:
 `nationwars-0.4.0-pre-checklist9_2026-07-25_221548.zip`  
 SHA-256: `C9AB3BEA214329540908C0A33ECBA202189575A8E30C2AAC9DEA9C4709CD5A1F`
 
+Checklist 10 backup:
+`nationwars-0.5.1-pre-checklist10_2026-07-30_224923.zip`  
+SHA-256: `D88E0D03D0E5F0FBF10471623816C3359E03C3B53A175D47998062492BB3A5FD`
+
 ## Runtime and dependencies
 
-- Mod ID: `nationwars`; mod version: `0.5.0`.
+- Mod ID: `nationwars`; mod version: `0.5.1`.
 - Java 21 and Minecraft 1.21.1. The build target is NeoForge 21.1.227 and
   metadata accepts compatible NeoForge `[21.1.227,)` releases for 1.21.1.
 - Open Parties and Claims (OPAC) 0.27.5 is a required runtime and compile
@@ -24,15 +28,15 @@ SHA-256: `C9AB3BEA214329540908C0A33ECBA202189575A8E30C2AAC9DEA9C4709CD5A1F`
   `[21.1.227,)`; at baseline only Minecraft 1.21.1/NeoForge 21.1.227 had been
   smoke-tested in this project.
 - All gameplay code is common/dedicated-server compatible. The baseline lacked
-  language resources; 0.5.0 includes English, Romanian, Spanish, and Polish catalogs.
+  language resources; 0.5.1 includes English, Romanian, Spanish, and Polish catalogs.
   Players need the Nation Wars resources on their client for text to follow
   their selected Minecraft language.
 
 ## Startup, ticking, and shutdown
 
 - On `ServerStartedEvent`, Nation Wars loads its JSON config, activates and
-  synchronizes its OPAC party system, loads world data, migrates coast markers,
-  refreshes tab-list names, and schedules income, maintenance, and OPAC retries.
+  synchronizes its OPAC party system, loads world data, refreshes tab-list
+  names, and schedules income, maintenance, and OPAC retries.
 - Passive income first runs 12,000 server ticks after startup and then every
   12,000 ticks (normally ten minutes).
 - Maintenance first runs 12,000 server ticks after startup and then every
@@ -49,7 +53,7 @@ SHA-256: `C9AB3BEA214329540908C0A33ECBA202189575A8E30C2AAC9DEA9C4709CD5A1F`
 All normal player roots require permission level 0. Subcommands that act for a
 nation generally also require the executing player to be that nation's owner.
 
-| Command | 0.5.0 behavior |
+| Command | 0.5.1 behavior |
 | --- | --- |
 | `/money` | Shows the executing player's balance. |
 | `/market` | Opens the paged market. |
@@ -65,7 +69,6 @@ nation generally also require the executing player to be that nation's owner.
 | `/nation info [name]` | Own nation is always visible; named lookup requires `Satellites=true`; output includes the capital chunk. |
 | `/nation claim` | Owner claims the current chunk subject to dimension, spawn, adjacency, cost, and OPAC checks. |
 | `/nation unclaim` | Owner unclaims a non-capital, non-occupied claim. |
-| `/nation city` | United States owner converts an owned non-occupied claim into a city by paying its current claim cost. |
 | `/nation trade <country>` | Opens bilateral trade UI when `AllowTrade=true` and the nations are not fighting. |
 | `/nation upgrade` | Owner buys one of four upgrades; unavailable to USA. |
 | `/nation guarantee [remove] <country>` | Adds/removes an external guarantee when enabled. |
@@ -93,7 +96,7 @@ nation generally also require the executing player to be that nation's owner.
 | `/puppet release/annex <country>` | Master manually releases or, at an allowed threshold, annexes a direct puppet. |
 | `/puppet war` | Starts an immediate independence war against the master when points exceed 150. |
 | `/configure` | Permission level 2; reads/writes server settings. `/configurate` is not registered. |
-| `/nwdev` and `/nationwarsdev` | Permission level 4 and technical debug gate; set money/treasury/doctrine, finish spy missions, save, or sync OPAC. |
+| `/nwdev` | Permission level 4 and technical debug gate; set money/treasury/doctrine, finish spy missions, save, or sync OPAC. `/nationwarsdev` is not registered. |
 | `/configure deletenation <country>` | Permission level 4; audited destructive nation deletion with full-name/ID lookup and OPAC resynchronization. It is not debug-gated. |
 | `/openpac-parties` | Removed/replaced and execution-blocked, including namespaced aliases; directs players to `/alliance`. |
 
@@ -123,6 +126,11 @@ file, an atomic replacement where available, and one `.bak` copy.
 | `colonialism` | `false` | Later claims in a dimension must touch national territory. |
 | `allowTrade` | `true` | Nation-to-nation trade is enabled. |
 | `puppets` / `Puppets` | `true` | Enables puppet commands, restrictions, peace terms, point effects, and income tax. Disabling it preserves saved relations. |
+| `stealing` / `Stealing` | `true` | Allows members of foreign nations to pay for protected-container/door access. When false, nationless players retain paid access. |
+| `maintenanceMultiplier` / `MaintenanceMultiplierr` | `1.0` | Global multiplier composed after doctrine and conditional maintenance effects. The command intentionally has the checklist's double `r`. |
+| `claimCostMultiplier` / `ClaimCostMultiplier` | `1.0` | Global multiplier composed after the doctrine claim-cost multiplier. |
+| `incomeMultiplier` / `IncomeMultiplier` | `1.0` | Global multiplier for active capital passive income after doctrine effects; member income remains a separate term. |
+| `memberIncome` / `MemberIncome` | `10` | Maximum number of members counted by passive member income. |
 | `spawnProtection` | `200` | Claims intersecting a 200-block radius around Overworld spawn are rejected. |
 | `disabledDoctrines` | empty | No doctrine is disabled. |
 
@@ -154,33 +162,43 @@ old `/configurate` root and misspelled `Satelites` setting alias are disabled.
 - Base capital income is **$120 per ten-minute cycle**. Each nation upgrade adds **$6 per cycle**
   and five free claims. Upgrade prices are **$1000, $1500, $2000, $2500**.
   There are at most four upgrades.
-- USA cannot purchase upgrades and has $120 per-cycle capital income.
+- USA cannot purchase upgrades. American Dream multiplies its active capital
+  passive income by **1.5**, producing $180 at the default global multiplier.
 - Soviet capital base income is $0 per cycle, but its upgrades add $6 per cycle each.
-- Each member after the first adds **$8 per cycle** outside the doctrine income
-  multiplier. For example, an unupgraded four-member Soviet nation receives
-  `$0 + (4 - 1) * $8 = $24 per cycle`.
-- A paralyzed capital or individual city/coast claim contributes no income;
-  member income continues because it does not come from a claim.
-- British Ports add **10% of that nation's current capital income** for every
-  owned coast claim, including a coastal capital.
-- Each USA city claim adds **20% of current capital income** and costs that
-  claim's current claim cost when created.
+- Each counted member after the first adds **$8 per cycle** outside the doctrine
+  and global capital-income multipliers. `MemberIncome` defaults to 10, so at
+  most the first ten members are counted. British Colonial Manpower doubles
+  this member term to $16 per counted member after the first. For example, an
+  unupgraded four-member Soviet nation receives `$0 + (4 - 1) * $8 = $24`.
+- A paralyzed or occupied capital contributes no capital income; member income
+  continues because it does not come from a claim.
+- City and port passive-income systems are not active in 0.5.1. Their old save
+  fields remain readable only for backward-compatible persistence.
 - Per ten-minute cycle, the exact generated amount is
-  `round(((active current capital contribution + active ports/cities) * doctrine income multiplier)
-  + max(0, member count - 1) * $8)`. The member term is outside the doctrine
-  multiplier. "Current capital" already includes the base and purchased $6
-  upgrade increments, so upgrades are not counted twice.
+  `round((active current capital * doctrine income multiplier * American Dream * global income multiplier)
+  + max(0, min(member count, MemberIncome) - 1) * $8 * member doctrine multiplier)`.
+  American Dream is 1.5 for USA and 1.0 otherwise. The member doctrine
+  multiplier is 2.0 for Britain and 1.0 otherwise. Current capital includes the
+  base and purchased $6 upgrade increments. American Dream deliberately does
+  not multiply mining or farming rewards.
 - Recurring trade values are denominated per ten-minute cycle and are diverted from the payer's generated passive
   income, never directly from treasury. If obligations exceed income, available
   income is divided proportionally and rounded; recipients receive only the
   amount actually diverted.
-- Maintenance runs every ten minutes. A nation with zero or one claim owes $0.
-  Otherwise: `claims * $8 * doctrineMaintenanceMultiplier`, plus another
-  `$8 * multiplier` for every occupied claim it holds (occupied claims are 2x).
+- Maintenance runs every ten minutes. An owned capital is free. The normal
+  base is `max(0, claim count - 1 owned capital) * $8`. If the capital has been
+  captured, no claim is exempt. An occupied claim held by the nation retains
+  the existing extra `$8` premium and therefore costs 2x.
+- The maintenance total composes the doctrine base, conditional doctrine
+  effects, and global `MaintenanceMultiplierr`. Germany therefore uses
+  `1.35 * global`, for example.
 - France multiplies its maintenance by **1.5** only while it is the primary
   attacker in an active war.
 - Romania adds **0.1** to its maintenance multiplier for each unique lost war
   core. Legacy `lostCoreTerritory=true` counts as one if no set entries exist.
+- Italy multiplies maintenance by **0.8** while participating in any active war.
+- Britain multiplies maintenance by **1.5** under Urban Sprawl when claim count
+  is at least five times member count (five or more claims per member).
 - Soviet base maintenance multiplier is **0.5**; Germany is **1.35**; others
   are **1.0** before the conditional doctrine effects above.
 - Failed maintenance removes one non-capital border claim; if none is eligible,
@@ -203,9 +221,10 @@ old `/configurate` root and misspelled `Satelites` setting alias are disabled.
 `round($100 * expansion * distance * doctrineClaimMultiplier)` where:
 
 - `expansion = 1 + max(0, ownedClaims - 1) * 0.1`;
-- `distance = 1` normally;
-- for USA in the capital's dimension, `distance += ManhattanChunkDistance * 0.03`;
+- `distance = 1`; the former American Isolation distance scaling is removed;
 - Soviet doctrine claim multiplier is 0.8; all other defaults are 1.0;
+- the configured global claim-cost multiplier is applied after the doctrine
+  multiplier and defaults to 1.0;
 - a free claim consumes one `freeClaimsRemaining` and bypasses the money cost.
 
 Default held-stack appraisal is count multiplied by: diamond $30, emerald $24,
@@ -240,18 +259,22 @@ USA buys at 0.8x; Soviet buys at 1.25x; default multipliers are 1.0.
   placing, fluids, all block interactions, entity interactions, entity attacks,
   and player-caused explosions in enemy war territory. Peace-offer, enemy-bed,
   and respawn locks remain explicit Nation Wars war rules.
+- `Stealing=false` rejects ordinary paid protected-container and door access by
+  members of foreign nations. Nationless visitors may still pay for access.
+  Active-war Scorched Earth and successful espionage raid access keep their
+  separate bypass behavior.
 - Active RAID effects grant temporary protected-claim interaction access.
 
 ## Doctrine defaults and effects
 
-| ID | Nation | Ideology | Claim x | Income x | Maintenance x | Free claims | Base capture | Other baseline effects |
+| ID | Nation | Ideology | Claim x | Passive capital x | Maintenance x | Free claims | Base capture | Other baseline effects |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | GER | Germany | Fascist | 1.0 | 1.0 | 1.35 | 4 | 35s | Justification 40s faster; counterspy blocks 50%. |
 | SOV | Soviet Union | Communist | 0.8 | 1.0 | 0.5 | 4 | 50s | No base capital income; market buy 1.25x; defense doubles unless two attackers are present. |
-| USA | United States | Democratic | 1.0 | 1.0 | 1.0 | 4 | 50s | Pacifist; distance claim scaling; market buy 0.8x; city claims; no upgrades. |
+| USA | United States | Democratic | 1.0 | 1.5 | 1.0 | 4 | 50s | Pacifist; American Dream 1.5x capital income; market buy 0.8x; no upgrades; loses $200 treasury per wartime claim loss. |
 | FRA | France | Democratic | 1.0 | 1.0 | 1.0 | 4 | 50s | Defender adds 25s; five bonus $300 spies; 3x betrayal cost; offensive-war maintenance 1.5x. |
-| ENG | United Kingdom | Democratic | 1.0 | 1.0 | 1.0 | 6 | 50s | Ports; coastal defense is captured 10s faster; peace-offer fee 3x. |
-| ITA | Italy | Fascist | 1.0 | 1.0 | 1.0 | 4 | 50s | Owned-land Speed II at peace/Speed I at war; $2 building payouts; hills add 15s defense; tracked core recapture adds 10s; larger defender can reject once. |
+| ENG | United Kingdom | Democratic | 1.0 | 1.0 | 1.0 | 6 | 50s | Colonial Manpower doubles member income; Urban Sprawl is 1.5x maintenance at five claims/member; peace-offer fee 3x. |
+| ITA | Italy | Fascist | 1.0 | 1.0 | 1.0 | 4 | 50s | Owned-land Speed II at peace/Speed I at war; $2 building payouts; tracked core recapture adds 10s; larger defender can reject once; War Propaganda is 0.8x maintenance while at war. |
 | ROM | Romania | Non-aligned | 1.0 | 1.0 | 1.0 | 4 | 50s | Safe war leave once per enemy ideology with 30m cooldown; enemies justify 30s longer; lost-core maintenance; Carol II drain. |
 
 Doctrine JSON datapacks may override these existing fields under
@@ -293,17 +316,16 @@ are restored before each reload.
   Occupied claims retain original-owner provenance and cannot be captured by a
   second active war.
 - Capture base uses the **attacker doctrine's capture seconds** times the
-  defender's defense multiplier. Then: France defender +25s; British coast
-  defender -10s; Italian hill/mountain defender +15s; Italian attacker
+  defender's defense multiplier. Then: France defender +25s; Italian attacker
   recapturing a claim in its war-start core snapshot +10s; Soviet defender
-  doubles the result with fewer than two attackers. Final capture time is
-  rounded with a 10-second minimum.
+  doubles the result with fewer than two attackers. Sea Lion coastal and Alpes
+  hill/mountain modifiers are removed. Final capture time is rounded with a
+  10-second minimum.
 - A defending member in the claim pauses capture. A pending peace offer also
   pauses capture without resetting accumulated seconds.
-- Capturing a capital capitulates the defender and targets 25% (rounded up,
-  minimum one) of its war-start core count times surrender multiplier,
-  including already captured qualifying cores. A primary defender ends the
-  war; a joined defender leaves while the wider war continues.
+- Capturing a capital is an ordinary wartime claim capture. It does not
+  capitulate the defender, automatically transfer more territory, remove a
+  participant, or end the war.
 - Elimination at zero claims deletes the nation and splits its treasury plus
   owner player balance among captors, weighted by captured territory.
 - Primary-defender surrender transfers enough eligible cores to reach 25% of
@@ -531,10 +553,11 @@ refresh costs $100 for every currently known field.
   an `OPEN` default. The pre-pass implementation was invite-only, so the
   corrective pass treats that default change as a confirmed compatibility
   regression and restores `INVITE_ONLY`.
-- Maintenance charges every claim once a nation owns more than one, rather than
-  charging only claims after the first. This is preserved as gameplay.
-- A coastal British capital receives both capital income and the additional
-  Ports contribution. This is preserved as gameplay.
+- Occupied claims held by a nation still receive the inherited extra
+  maintenance premium even though the owned capital is exempt from normal
+  maintenance.
+- The global income multiplier applies only to the capital term, matching the
+  established separation between capital and member income.
 - Betrayal penalties may make a nation treasury negative. This is preserved.
 - An Italian building position is permanently marked after the first reward
   attempt even when its 20% roll fails. This is preserved.
@@ -549,8 +572,8 @@ refresh costs $100 for every currently known field.
 
 ### Intentional gameplay behavior
 
-All behavior described above is intentional for 0.5.0. Only Checklist 9 and
-the puppet specification authorize changes from the inherited 0.4.0 contract;
+All behavior described above is intentional for 0.5.1. Checklist 9, the puppet
+specification, FIX 0.5, and CHECKLIST 10 authorize changes from the inherited contract;
 unlisted economy values, doctrine effects, ordinary command permissions, menu
 navigation, immediate save timing, and OPAC behavior remain unchanged.
 
@@ -567,13 +590,17 @@ navigation, immediate save timing, and OPAC behavior remain unchanged.
   without one and `CLOSED` rejects joining.
 - `/nation accept`, `/nation reject`, and `/nation joinpolicy` are the isolated
   policy commands explicitly authorized by Stage 6.
-- `/nwdev` and `/nationwarsdev` now require permission level 4, are gated by a
+- `/nwdev` requires permission level 4, is gated by a
   development-aware technical setting, and audit destructive uses. Ordinary
   player command permissions are unchanged.
 - Technical settings live in NeoForge's `nationwars-technical.toml`; gameplay
   and balance settings remain in the existing Nation Wars server JSON.
 
-## Authorized 0.5.0 addendum
+## Historical authorized 0.5.0 addendum
+
+This section records the 0.5.0 release baseline. The later authorized 0.5.1
+addendum overrides its city, port, doctrine, maintenance, capital-capture, and
+command-root statements.
 
 - Release metadata is 0.5.0 and save data advances to version 2 solely to
   persist puppet relations, proposals, point cooldowns/losses, and
@@ -600,3 +627,23 @@ navigation, immediate save timing, and OPAC behavior remain unchanged.
   behavior-locked: Italian Push-over; $250 betrayal and France's $750 variant;
   French 1.5x offensive-war maintenance; Soviet 1.25x market price and doubled
   sub-two-attacker defense; Romanian stacking +0.1 lost-core maintenance.
+
+## Authorized 0.5.1 addendum
+
+- Release metadata is 0.5.1. No save schema conversion is required: legacy
+  city/coast fields remain readable, but no live 0.5.1 rule consumes them.
+- Maintenance exempts one claim only while the nation owns its capital, then
+  applies the retained occupied-claim premium and composed doctrine/global
+  multipliers. No economy value other than the expressly requested formula and
+  doctrine effects changed.
+- `MaintenanceMultiplierr`, `ClaimCostMultiplier`, and `IncomeMultiplier`
+  default to 1.0; `MemberIncome` defaults to 10; `Stealing` defaults to true.
+- American Isolation/cities, British Ports/Sea Lion, and Italian Alpes are no
+  longer live mechanics. American Dream, Wall Street Crash, Colonial Manpower,
+  Urban Sprawl, and War Propaganda are the replacements documented above.
+- Wartime trade offers are rejected both before the menu sends an offer and in
+  the authoritative store/application layer.
+- Scorched Earth refreshes an OPAC full-access pass before physical block
+  events so hand/tool destruction works in enemy active-war territory.
+- `/nation city` and `/nationwarsdev` are unregistered. `/nwdev` and all other
+  ordinary command syntax remain as documented.

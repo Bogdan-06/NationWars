@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.5.1
+
+### Added
+
+- `/configure MaintenanceMultiplierr <amount>` multiplies all maintenance
+  after doctrine effects. Its default is `1.0`.
+- `/configure ClaimCostMultiplier <amount>` multiplies claim prices after the
+  doctrine claim-cost effect. Its default is `1.0`.
+- `/configure IncomeMultiplier <amount>` multiplies the active capital portion
+  of passive national income after doctrine effects. Its default is `1.0`.
+- `/configure MemberIncome <amount>` limits how many nation members are counted
+  by the per-member passive-income term. Its default is `10`.
+- `/configure Stealing <true|false>` controls paid protected-container and door
+  access by members of foreign nations. It defaults to `true`; nationless
+  players retain access when it is disabled.
+
+### Changed
+
+- Maintenance is now `(claim count - one owned capital) * $8`, then doctrine
+  and global maintenance multipliers are applied. The existing extra occupied-
+  claim premium remains.
+- Passive member income counts only the first ten members by default.
+- United States: Isolation and city claims were removed. Capitalism was renamed
+  American Dream and now gives 1.5x active capital passive income. Wall Street
+  Crash removes $200 from the national treasury for each claim lost during war.
+- United Kingdom: Ports and Sea Lion were removed. Colonial Manpower doubles
+  passive member income. Urban Sprawl multiplies maintenance by 1.5 when the
+  nation has at least five claims per member.
+- Italy: Alpes was removed. War Propaganda multiplies maintenance by 0.8 while
+  Italy participates in an active war.
+- Capturing a capital no longer causes automatic capitulation or ends a war.
+  Zero remaining territory still eliminates the nation.
+- Nations cannot send or apply trade offers while the two nations are at war.
+- `/nationwarsdev` was removed; `/nwdev` remains the development command root.
+
+### Removed
+
+- `/nation city` and all city-purchase behavior.
+- Live city, port, coastal capture, and hill/mountain capture modifiers. Old
+  serialized city/coast fields remain readable so existing saves are not
+  damaged.
+
+### Fixed
+
+- `ScorchedEarth=true` now grants the temporary OPAC bypass early enough for
+  physical hand/tool destruction in enemy wartime claims, not only explosions.
+
 ## 0.5.0
 
 ### Added
