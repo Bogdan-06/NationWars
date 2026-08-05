@@ -2,6 +2,12 @@
 
 Development project for Nation Wars 0.5.1.
 
+This repository preserves the complete known Nation Wars release lineage. Use
+the Git tags and GitHub Releases to view or download a specific version. Source
+for releases before 0.2.2 was recovered from the published CurseForge JARs and
+is clearly marked as decompiled historical source. See [RELEASES.md](RELEASES.md)
+for provenance, file IDs, and checksums.
+
 Nation Wars is a server-side NeoForge mod providing nations, chunk claims,
 economy, markets, alliances, war, peace deals, doctrine bonuses, and integration
 with Open Parties and Claims.
