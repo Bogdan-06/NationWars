@@ -1,5 +1,10 @@
 # Changelog
 
+Versions 0.1.0 through 0.2.2 were reconstructed from the published CurseForge
+JARs and their surviving release notes because the original handwritten source
+history was not retained. Later entries come from the preserved development
+projects.
+
 ## 0.5.1
 
 ### Added
@@ -300,3 +305,243 @@
 - Infiltration and paralysis: 10 minutes.
 - RAID protection removal: 5 minutes.
 - Intelligence missions without an explicit risk use a 15% failure chance.
+
+## 0.2.2
+
+This is the version embedded in the JAR that CurseForge published under the
+title **Nation Wars 0.2.1**. The `v0.2.1` and `v0.2.2` archive tags therefore
+refer to the same original binary.
+
+### Added
+
+- Added `nationwars-server.json` configuration for doctrine uniqueness and
+  per-doctrine selection limits.
+- Added an option for Nation Wars to make OPAC use its party system as the
+  primary party system.
+- Added configurable doctrine limits while retaining the one-nation-per-
+  doctrine default.
+
+### Changed
+
+- Updated Open Parties and Claims compatibility to the 0.27.5 through 0.27.x
+  API line.
+- Preserved datapack doctrine overrides introduced in 0.2.0.
+
+## 0.2.1
+
+CurseForge named this upload **0.2.1**, but the downloaded filename and
+embedded mod metadata identify it as **0.2.2**. Its gameplay changes are the
+same as the 0.2.2 entry above.
+
+## 0.2.0
+
+### Added
+
+- Added datapack overrides for the seven built-in doctrines.
+- Doctrine display names, icons, lore, numeric modifiers, and supported
+  behavior flags can be changed through JSON resources.
+- Added a server reload listener so doctrine overrides are applied on datapack
+  reload and reset cleanly to defaults before new values are read.
+
+### Changed
+
+- Doctrine icons and descriptions are now data-driven while retaining the
+  existing built-in values as fallbacks.
+
+## 0.1.12
+
+### Doctrine and war update
+
+- Reduced the standard claim capture time to 50 seconds.
+- Germany gained the shorter Gleiwitz justification and updated Blitzkrieg and
+  surrender effects.
+- France gained the stronger Maginot defense and offensive-war maintenance
+  penalty.
+- Romania gained Flexible Foreign Policy; King Michael's Coup became usable
+  once per enemy ideology, and Iron Guard became a per-core-loss penalty.
+- The United Kingdom gained Ports income and updated Sea Lion coastal capture
+  behavior.
+- Italy gained Developed Infrastructure, core-claim build rewards, the Alpes
+  defense modifier, one-time Push-over rejection, and slower core recapture.
+- United States city income now costs the current claim price.
+- Raised paid foreign-claim access to $50 and allowed player-caused explosions
+  in owned claims and enemy wartime claims.
+
+## 0.1.11.1
+
+### Compatibility
+
+- Corrected the declared Open Parties and Claims dependency range to versions
+  0.26.3 through 0.26.x.
+- No gameplay code changed from 0.1.11.
+
+## 0.1.11
+
+### Added and changed
+
+- Displayed generated command IDs when nations are created and in nation
+  information, allowing display names with spaces to be addressed reliably.
+- Joined allies can now surrender out of a multi-nation war without ending the
+  main war; their captured claims are returned and their participation is
+  removed cleanly.
+- Peace deals between secondary participants now affect only those
+  participants, while a deal between the main attacker and defender still ends
+  the entire war.
+- Allied attackers on the same war side now count together for Soviet capture
+  defense checks.
+
+### Fixed
+
+- Tightened the temporary OPAC wartime bypass to the exact protected action.
+- Blocked foreign fluid placement outside wars while retaining legal wartime
+  placement.
+- Corrected captured-claim return and tracking for multi-party peace and
+  surrender paths.
+
+## 0.1.10
+
+### Changed
+
+- Reworked doctrine descriptions into named, readable perks and drawbacks in
+  the doctrine menu and `/nation doctrines list`.
+- Standardized war justification to 90 seconds before later doctrine-specific
+  adjustments were introduced.
+- Updated doctrine defaults and made Soviet defensive capture resistance apply
+  across Soviet territory when fewer than two attackers are present.
+
+### Added
+
+- `/nation info` now reports ten-minute maintenance spending and passive
+  income.
+- Nations now receive a chat notification when scheduled maintenance is paid.
+
+## 0.1.9
+
+### Fixed
+
+- Rewards are no longer paid for mining or building actions cancelled by claim
+  protection.
+- City-income claims are cleaned up when territory is unclaimed, sold,
+  captured, or lost to maintenance.
+- Added load-time cleanup for stale cities, orphaned claims, missing membership
+  links, and malformed claim references.
+- Existing justifications and pending declarations can no longer be
+  overwritten accidentally.
+- Invalid market sellers and stored spy-player IDs no longer break their
+  processing paths.
+- Spy completion checks now run once per second, and one malformed OPAC claim
+  can no longer abort the entire synchronization pass.
+
+## 0.1.8
+
+### Added
+
+- Added the `/nation create` doctrine menu followed by chat-based nation naming.
+- Added `/nations` and `/war status` chest interfaces.
+- Added a boss bar for claim-capture progress.
+
+### Changed
+
+- Capture progress decays while the attacker is away, resumes if they return,
+  and pauses when a defender is present.
+- OPAC-mirrored claims now attempt to display the nation name and resynchronize
+  after server startup.
+
+### Fixed
+
+- Cleared pending creation prompts after logout, restart, joining a nation, or
+  reopening the menu.
+- Rejected blank nation-name paths and cleaned up obsolete creation state.
+
+## 0.1.7
+
+### Fixed
+
+- Surrender land transfer now falls back to another owned claim if no eligible
+  non-capital border claim exists, preventing surrender from stopping early on
+  unusual claim layouts.
+
+## 0.1.6
+
+### Added
+
+- Added owner-approved land purchase offers and claim transfer commands.
+- Expanded peace rejection, surrender, capitulation, and nation-elimination
+  handling.
+- Added per-nation captured-claim tracking, peace-offer cooldowns, and spy
+  cooldown persistence.
+- Added doctrine-specific build rewards, terrain capture modifiers, and
+  one-time war-declaration rejection behavior.
+
+### Changed
+
+- Nations that lose all territory are removed and defeated wealth is
+  distributed through the war-resolution path.
+- Nation Wars now forces OPAC's per-player claim allowance out of the way so
+  Nation Wars remains the authority for territorial limits.
+
+## 0.1.5
+
+### Added
+
+- Added the chest-style doctrine browser with country icons, availability,
+  statistics, and doctrine advantages and drawbacks.
+- Added `/war status` output for justifications, active sides, pending joins,
+  and peace state.
+- Added nation prefixes to the player list.
+- Added mining and building income, paid protected-container access, and
+  wartime interaction handling.
+
+### Changed
+
+- Capture progress pauses when defenders contest the chunk.
+- Doctrine and war information became available in-game without consulting
+  external documentation.
+
+## 0.1.4
+
+### Changed
+
+- Reformatted `/nation doctrines list` into separate doctrine headings and
+  compact statistics, making the doctrine list easier to read in chat.
+
+## 0.1.3
+
+### Added
+
+- Added alliances with create, invite, accept, kick, list, and information
+  commands.
+- Added multi-nation wars with voluntary join requests and alliance defense
+  calls.
+- Added ideology-aware, country-specific doctrine mechanics for claim cost,
+  upkeep, capture, surrender, market pricing, and diplomacy.
+- Added purchasable city-income claims and basic timed espionage reports.
+- Expanded nation and alliance information commands and persistence for the
+  new diplomacy, war-side, city, and spy data.
+
+## 0.1.2
+
+### Added
+
+- Added a chest-style peace-deal interface through `/peace`.
+- Peace offers can demand or offer border claims and treasury money, and can
+  request the return of captured claims.
+
+### Fixed
+
+- Corrected OPAC chunk-coordinate mirroring so Xaero overlays align with real
+  claims.
+- Added automatic OPAC synchronization after startup and when players join;
+  `/nation syncopac` remains available as an admin repair command.
+
+## 0.1.0
+
+### Initial alpha
+
+- Added nation creation and joining with seven WW2-inspired country doctrines.
+- Added chunk claims, capitals, territorial upkeep, passive income, and player
+  balances.
+- Added the player market and paid access to protected doors and containers.
+- Added war justification, territorial capture, peace, and surrender commands.
+- Added Open Parties and Claims integration for protection and map-visible
+  claims.
